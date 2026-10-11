@@ -49,8 +49,18 @@ func New(kubeconfig string) (*Client, error) {
 
 	mc, err := metrics.NewForConfig(cfg)
 	if err != nil {
-		// metrics-server 可能未安装，降级为可用但无指标
+		// 配置非法，直接降级
 		mc = nil
+	}
+
+	// metrics.NewForConfig 只构造客户端，不代表集群真装了 metrics-server。
+	// 用一次真实调用（列节点指标）探测 API 是否可用。
+	if mc != nil {
+		probeCtx, probeCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		if _, err := mc.MetricsV1beta1().NodeMetricses().List(probeCtx, metav1.ListOptions{Limit: 1}); err != nil {
+			mc = nil
+		}
+		probeCancel()
 	}
 
 	disc, err := discovery.NewDiscoveryClientForConfig(cfg)

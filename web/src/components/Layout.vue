@@ -94,6 +94,7 @@ const menus = [
       { path: '/nodes', label: '节点', icon: 'Cpu' },
       { path: '/namespaces', label: '项目', icon: 'FolderOpened' },
       { path: '/events', label: '事件', icon: 'Bell' },
+      { path: '/networkpolicies', label: '网络策略', icon: 'Share' },
     ],
   },
   {
@@ -105,6 +106,7 @@ const menus = [
       { path: '/pods', label: '容器组', icon: 'Grid' },
       { path: '/services', label: '服务', icon: 'Connection' },
       { path: '/ingresses', label: '应用路由', icon: 'Guide' },
+      { path: '/hpas', label: '弹性伸缩', icon: 'TrendCharts' },
     ],
   },
   {

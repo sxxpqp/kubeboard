@@ -7,7 +7,10 @@
         <el-button type="primary" :icon="'Plus'" @click="openCreate(nsTemplate)">创建项目</el-button>
         <el-button :icon="'Refresh'" @click="load" />
       </div>
-      <el-table :data="filtered" v-loading="loading" stripe class="ks-table">
+      <el-table
+        :data="filtered" v-loading="loading" stripe class="ks-table"
+        highlight-current-row :row-style="{ cursor: 'pointer' }" @row-click="openDetail"
+      >
         <el-table-column prop="name" label="名称" min-width="220" sortable>
           <template #default="{ row }"><span class="resource-name">{{ row.name }}</span></template>
         </el-table-column>
@@ -26,7 +29,8 @@
         </el-table-column>
         <el-table-column label="操作" width="140" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="openEdit(row.name)">编辑</el-button>
+            <el-button link type="primary" size="small" @click.stop="openDetail(row)">详情</el-button>
+            <el-button link type="primary" size="small" @click.stop="openEdit(row.name)">编辑</el-button>
             <el-button
               link type="danger" size="small"
               :disabled="['default','kube-system','kube-public','kube-node-lease'].includes(row.name)"
@@ -53,8 +57,10 @@
 import { computed, onMounted, ref } from 'vue'
 import http from '../api/http'
 import { useResourceCRUD } from '../api/crud'
+import { useRouter } from 'vue-router'
 import YamlDialog from '../components/YamlDialog.vue'
 
+const router = useRouter()
 const keyword = ref('')
 const items = ref([])
 const loading = ref(true)
@@ -75,6 +81,10 @@ const {
   dialogVisible, dialogMode, currentName, currentTemplate,
   openCreate, openEdit, remove,
 } = useResourceCRUD('namespace', load)
+
+function openDetail(row) {
+  router.push('/namespaces/' + row.name)
+}
 
 function fmtTime(ts) {
   return ts ? new Date(ts * 1000).toLocaleString() : '-'
