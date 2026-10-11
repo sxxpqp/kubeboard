@@ -100,7 +100,11 @@
 
         <!-- 事件 -->
         <el-tab-pane label="事件" name="events">
-          <el-table :data="detail.events || []" size="small" v-loading="loadingEvents" max-height="480">
+          <div class="ev-bar">
+            <el-switch v-model="onlyThis" size="small" active-text="仅本资源事件" />
+            <span class="muted">共 {{ (detail.events || []).length }} 条</span>
+          </div>
+          <el-table :data="detail.events || []" size="small" v-loading="loadingEvents" max-height="460">
             <el-table-column label="类型" width="80">
               <template #default="{ row }">
                 <el-tag :type="row.type === 'Warning' ? 'danger' : 'info'" size="small">{{ row.type }}</el-tag>
@@ -208,6 +212,7 @@ function gotoRelated(it) {
 const loading = ref(false)
 const loadingEvents = ref(false)
 const yamlText = ref('')
+const onlyThis = ref(true)
 const detail = ref({})
 
 watch(() => props.modelValue, async (v) => {
@@ -285,9 +290,13 @@ async function loadEvents() {
       headers: { Authorization: 'Bearer ' + localStorage.getItem('kubeboard_token') },
     }).then((r) => r.json())
     const nm = props.name
-    detail.value.events = (data.items || []).filter(
-      (e) => e.object && e.object.includes(nm)
-    )
+    const kindNorm = (props.kind || '').toLowerCase()
+    // 优先按 UID 精确关联；若资源无 UID（旧接口）回退到 kind+name 精确匹配
+    detail.value.events = (data.items || []).filter((e) => {
+      const okKind = !e.kind || !kindNorm || e.kind.toLowerCase() === kindNorm
+      if (onlyThis.value) return okKind && e.name === nm
+      return okKind && (e.name === nm || (e.object || '').includes(nm))
+    })
   } catch {
     detail.value.events = []
   } finally {
@@ -312,6 +321,7 @@ defineExpose({ reload: loadDetail })
 .rel-name { font-weight: 500; }
 .rel-ns { color: var(--ks-text-secondary); font-size: 11px; margin-left: 6px; }
 .rel-extra { color: var(--ks-text-secondary); font-size: 11px; margin-left: 6px; font-style: italic; }
+.ev-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .label-block { margin-bottom: 20px; }
 .label-title { font-weight: 600; font-size: 13px; margin-bottom: 10px; }
 .yaml-box {

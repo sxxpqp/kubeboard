@@ -251,3 +251,34 @@ func (h *Handler) cordonNode(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"name": req.Name, "unschedulable": req.Unschedulable})
 }
+
+// pauseWorkload 暂停或恢复 Deployment 的滚动更新
+func (h *Handler) pauseWorkload(c *gin.Context) {
+	var req struct {
+		Kind      string `json:"kind"`
+		Namespace string `json:"namespace"`
+		Name      string `json:"name"`
+		Paused    bool   `json:"paused"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	ctx := c.Request.Context()
+	switch req.Kind {
+	case "deployment":
+		d, err := h.k8s.Clientset.AppsV1().Deployments(req.Namespace).Get(ctx, req.Name, metav1.GetOptions{})
+		if err != nil {
+			c.JSON(httpStatus(err), gin.H{"error": err.Error()})
+			return
+		}
+		d.Spec.Paused = req.Paused
+		if _, err := h.k8s.Clientset.AppsV1().Deployments(req.Namespace).Update(ctx, d, metav1.UpdateOptions{}); err != nil {
+			c.JSON(httpStatus(err), gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"paused": req.Paused})
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "暂停/恢复仅支持 deployment"})
+	}
+}

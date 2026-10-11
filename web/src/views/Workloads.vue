@@ -34,12 +34,13 @@
         <el-table-column label="创建时间" width="150" sortable prop="creationTime">
           <template #default="{ row }">{{ fmtTime(row.creationTime) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="340" fixed="right">
+        <el-table-column label="操作" width="400" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="openScale(row)">伸缩</el-button>
             <el-button link type="primary" size="small" @click="openImage(row)">镜像</el-button>
             <el-button link type="primary" size="small" @click="openLogs(row)">日志</el-button>
             <el-button link type="warning" size="small" @click="restart(row)">重启</el-button>
+            <el-button link type="primary" size="small" @click="openRollout(row)">更新状态</el-button>
             <el-button link type="primary" size="small" @click="openVersions(row)">版本</el-button>
             <el-button link type="primary" size="small" @click="openEdit(row.name, row.namespace)">编辑</el-button>
             <el-button link type="danger" size="small" @click="remove(row.name, row.namespace)">删除</el-button>
@@ -84,6 +85,62 @@
       :namespaces="namespaces" @deployed="load"
     />
 
+    <!-- 滚动更新状态 -->
+    <el-dialog v-model="rolloutVisible" :title="`滚动更新状态: ${rolloutTarget.namespace}/${rolloutTarget.name}`" width="640px">
+      <div v-loading="rolloutLoading" style="min-height: 200px">
+        <template v-if="rollout">
+          <div class="ro-head">
+            <el-tag :type="rollout.inProgress ? 'warning' : 'success'" effect="dark">
+              {{ rollout.message }}
+            </el-tag>
+            <el-tag v-if="rollout.paused" type="danger" size="small">已暂停</el-tag>
+            <span class="ro-strategy">策略: {{ rollout.strategy }}
+              <template v-if="rollout.maxSurge"> · maxSurge {{ rollout.maxSurge }}</template>
+              <template v-if="rollout.maxUnavailable"> · maxUnavailable {{ rollout.maxUnavailable }}</template>
+              <template v-if="rollout.partition"> · partition {{ rollout.partition }}</template>
+            </span>
+          </div>
+
+          <div class="ro-progress">
+            <el-progress
+              :percentage="rollout.progress"
+              :status="rollout.inProgress ? undefined : 'success'"
+              :stroke-width="18" text-inside
+            />
+          </div>
+
+          <div class="ro-stats">
+            <div class="stat"><span>期望</span><b>{{ rollout.desired }}</b></div>
+            <div class="stat"><span>已更新</span><b>{{ rollout.updatedReplicas }}</b></div>
+            <div class="stat"><span>就绪</span><b>{{ rollout.readyReplicas }}</b></div>
+            <div class="stat"><span>可用</span><b>{{ rollout.availableReplicas }}</b></div>
+            <div class="stat" v-if="rollout.unavailableReplicas !== undefined">
+              <span>不可用</span><b :class="{ bad: rollout.unavailableReplicas > 0 }">{{ rollout.unavailableReplicas }}</b>
+            </div>
+          </div>
+
+          <div class="ro-ops">
+            <el-button size="small" @click="doRestart(rolloutTarget)" :loading="rolloutActing">触发滚动重启</el-button>
+            <el-button size="small" v-if="!rollout.paused" @click="doPause(true)" :loading="rolloutActing">暂停更新</el-button>
+            <el-button size="small" v-else @click="doPause(false)" :loading="rolloutActing">恢复更新</el-button>
+            <el-button size="small" @click="loadRollout">刷新</el-button>
+          </div>
+
+          <el-divider content-position="left">条件</el-divider>
+          <el-table :data="rollout.conditions || []" size="small">
+            <el-table-column prop="type" label="类型" width="140" />
+            <el-table-column label="状态" width="80">
+              <template #default="{ row }">
+                <el-tag :type="row.status === 'True' ? 'success' : 'info'" size="small">{{ row.status }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="reason" label="原因" width="150" />
+            <el-table-column prop="message" label="消息" min-width="200" />
+          </el-table>
+        </template>
+      </div>
+    </el-dialog>
+
     <!-- 版本历史 -->
     <el-drawer v-model="versionVisible" :title="`版本历史: ${versionTarget.namespace}/${versionTarget.name}`" size="700px">
       <VersionHistory :kind="kind" :namespace="versionTarget.namespace" :name="versionTarget.name" />
@@ -118,6 +175,11 @@ const loading = ref(true)
 const acting = ref(false)
 
 const deployVisible = ref(false)
+const rolloutVisible = ref(false)
+const rolloutLoading = ref(false)
+const rolloutActing = ref(false)
+const rollout = ref(null)
+const rolloutTarget = ref({ namespace: '', name: '' })
 const versionVisible = ref(false)
 const versionTarget = ref({ namespace: '', name: '' })
 const scaleVisible = ref(false)
@@ -183,6 +245,46 @@ async function doScale() {
   } catch (e) {
     ElMessage.error(e.response?.data?.error || '操作失败')
   } finally { acting.value = false }
+}
+
+async function loadRollout() {
+  rolloutLoading.value = true
+  try {
+    rollout.value = await http.get('/workloads/rollout', {
+      params: { kind: kind.value, namespace: rolloutTarget.value.namespace, name: rolloutTarget.value.name },
+    })
+  } catch (e) {
+    ElMessage.error(e.response?.data?.error || '获取滚动更新状态失败')
+  } finally {
+    rolloutLoading.value = false
+  }
+}
+function openRollout(row) {
+  rolloutTarget.value = { namespace: row.namespace, name: row.name }
+  rolloutVisible.value = true
+  loadRollout()
+}
+async function doPause(paused) {
+  rolloutActing.value = true
+  try {
+    await http.post('/workloads/pause', {
+      kind: kind.value, namespace: rolloutTarget.value.namespace, name: rolloutTarget.value.name, paused,
+    })
+    ElMessage.success(paused ? '已暂停滚动更新' : '已恢复滚动更新')
+    await loadRollout()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.error || '操作失败')
+  } finally { rolloutActing.value = false }
+}
+async function doRestart(t) {
+  rolloutActing.value = true
+  try {
+    await http.post('/workloads/restart', { kind: kind.value, namespace: t.namespace, name: t.name })
+    ElMessage.success('已触发滚动重启')
+    await loadRollout()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.error || '操作失败')
+  } finally { rolloutActing.value = false }
 }
 
 function openVersions(row) {
@@ -275,4 +377,13 @@ onMounted(async () => {
 .table-footer { padding: 12px 4px 0; color: var(--ks-text-secondary); font-size: 12px; }
 .dialog-label { margin-bottom: 10px; color: var(--ks-text-secondary); }
 .dialog-hint { margin-top: 8px; font-size: 12px; color: var(--ks-text-secondary); }
+.ro-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.ro-strategy { font-size: 12px; color: var(--ks-text-secondary); }
+.ro-progress { margin-bottom: 18px; }
+.ro-stats { display: flex; gap: 14px; margin-bottom: 16px; }
+.ro-stats .stat { flex: 1; text-align: center; background: var(--ks-bg-light, #f7f9fc); border-radius: 6px; padding: 10px; }
+.ro-stats .stat span { display: block; font-size: 12px; color: var(--ks-text-secondary); margin-bottom: 4px; }
+.ro-stats .stat b { font-size: 18px; }
+.ro-stats .stat b.bad { color: var(--ks-danger); }
+.ro-ops { margin-bottom: 8px; }
 </style>

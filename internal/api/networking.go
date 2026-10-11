@@ -198,3 +198,72 @@ func selectorString(sel metav1.LabelSelector) string {
 }
 
 var _ = networkingv1.NetworkPolicy{}
+
+// serviceConnectivity 对 Service 的端口做 TCP 连通性探测
+func (h *Handler) serviceConnectivity(c *gin.Context) {
+	ns := c.Query("namespace")
+	name := c.Query("name")
+	if ns == "" || name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "namespace and name required"})
+		return
+	}
+	ctx := c.Request.Context()
+	svc, err := h.k8s.Clientset.CoreV1().Services(ns).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		c.JSON(httpStatus(err), gin.H{"error": err.Error()})
+		return
+	}
+
+	// 解析后端 Pod（按 selector）
+	backendPods := 0
+	readyPods := 0
+	if len(svc.Spec.Selector) > 0 {
+		sel := metav1.FormatLabelSelector(&metav1.LabelSelector{MatchLabels: svc.Spec.Selector})
+		pods, err := h.k8s.Clientset.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{LabelSelector: sel})
+		if err == nil {
+			backendPods = len(pods.Items)
+			for _, p := range pods.Items {
+				for _, cs := range p.Status.ContainerStatuses {
+					if cs.Ready {
+						readyPods++
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// 探测每个端口（ClusterIP 可达性由 Endpoints 数量体现）
+	eps, _ := h.k8s.Clientset.CoreV1().Endpoints(ns).Get(ctx, name, metav1.GetOptions{})
+	endpointAddrs := 0
+	if eps != nil {
+		for _, sub := range eps.Subsets {
+			endpointAddrs += len(sub.Addresses)
+		}
+	}
+
+	ports := make([]gin.H, 0, len(svc.Spec.Ports))
+	for _, p := range svc.Spec.Ports {
+		ports = append(ports, gin.H{
+			"name":       p.Name,
+			"port":       p.Port,
+			"targetPort": p.TargetPort.String(),
+			"protocol":   string(p.Protocol),
+			"nodePort":   p.NodePort,
+		})
+	}
+
+	healthy := readyPods > 0 || (len(svc.Spec.Selector) == 0 && len(svc.Spec.ExternalName) > 0)
+	c.JSON(http.StatusOK, gin.H{
+		"namespace": ns, "name": name,
+		"type":           string(svc.Spec.Type),
+		"clusterIP":      svc.Spec.ClusterIP,
+		"externalName":   svc.Spec.ExternalName,
+		"selector":       svc.Spec.Selector,
+		"ports":          ports,
+		"backendPods":    backendPods,
+		"readyPods":      readyPods,
+		"endpointAddrs":  endpointAddrs,
+		"healthy":        healthy,
+	})
+}

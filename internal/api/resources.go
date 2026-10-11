@@ -255,6 +255,10 @@ func (h *Handler) listEvents(c *gin.Context) {
 			"reason":     e.Reason,
 			"message":    e.Message,
 			"object":     fmt.Sprintf("%s/%s", e.InvolvedObject.Kind, e.InvolvedObject.Name),
+			"kind":       e.InvolvedObject.Kind,
+			"name":       e.InvolvedObject.Name,
+			"uid":        string(e.InvolvedObject.UID),
+			"apiVersion": e.InvolvedObject.APIVersion,
 			"count":      e.Count,
 			"lastSeen":   e.LastTimestamp.Unix(),
 		})
