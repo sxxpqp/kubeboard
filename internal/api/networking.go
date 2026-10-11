@@ -267,3 +267,66 @@ func (h *Handler) serviceConnectivity(c *gin.Context) {
 		"healthy":        healthy,
 	})
 }
+
+// ServiceEndpoints 返回 Service 的 Endpoints 明细（地址、端口、就绪状态）
+func (h *Handler) ServiceEndpoints(c *gin.Context) {
+	ns := c.Query("namespace")
+	name := c.Query("name")
+	if name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing name"})
+		return
+	}
+	ctx := c.Request.Context()
+	eps, err := h.k8s.Clientset.CoreV1().Endpoints(ns).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		c.JSON(httpStatus(err), gin.H{"error": err.Error(), "subsets": []gin.H{}})
+		return
+	}
+	subsets := make([]gin.H, 0, len(eps.Subsets))
+	totalReady, totalNotReady := 0, 0
+	for _, sub := range eps.Subsets {
+		addrs := make([]gin.H, 0, len(sub.Addresses))
+		for _, a := range sub.Addresses {
+			addrs = append(addrs, gin.H{
+				"ip": a.IP, "hostname": a.Hostname, "nodeName": strOrEmptyPtr(a.NodeName),
+				"ready": true,
+				"targetRef": refBrief(a.TargetRef),
+			})
+			totalReady++
+		}
+		notReady := make([]gin.H, 0, len(sub.NotReadyAddresses))
+		for _, a := range sub.NotReadyAddresses {
+			notReady = append(notReady, gin.H{
+				"ip": a.IP, "hostname": a.Hostname, "nodeName": strOrEmptyPtr(a.NodeName),
+				"ready": false,
+				"targetRef": refBrief(a.TargetRef),
+			})
+			totalNotReady++
+		}
+		ports := make([]gin.H, 0, len(sub.Ports))
+		for _, p := range sub.Ports {
+			ports = append(ports, gin.H{
+				"name": p.Name, "port": p.Port, "protocol": string(p.Protocol),
+			})
+		}
+		subsets = append(subsets, gin.H{"addresses": addrs, "notReadyAddresses": notReady, "ports": ports})
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"namespace": ns, "name": name,
+		"subsets": subsets, "readyCount": totalReady, "notReadyCount": totalNotReady,
+	})
+}
+
+func strOrEmptyPtr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+func refBrief(ref *corev1.ObjectReference) gin.H {
+	if ref == nil {
+		return nil
+	}
+	return gin.H{"kind": ref.Kind, "name": ref.Name, "namespace": ref.Namespace}
+}

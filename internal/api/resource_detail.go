@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -78,7 +79,7 @@ func (h *Handler) resourceDetail(c *gin.Context) {
 	// 完整 YAML
 	yamlBytes, _ := yaml.Marshal(content)
 
-	c.JSON(http.StatusOK, gin.H{
+	resp := gin.H{
 		"kind":        gvk.Kind,
 		"apiVersion":  gvk.GroupVersion().String(),
 		"namespace":   ns,
@@ -87,7 +88,14 @@ func (h *Handler) resourceDetail(c *gin.Context) {
 		"spec":        spec,
 		"status":      status,
 		"rawYaml":     string(yamlBytes),
-	})
+	}
+
+	// PVC：找出正在使用它的 Pod（跨命名空间扫描）
+	if strings.ToLower(kindParam) == "pvc" {
+		resp["usedByPods"] = h.podsUsingPVC(c.Request.Context(), ns, name)
+	}
+
+	c.JSON(http.StatusOK, resp)
 }
 
 func metaString(content map[string]interface{}, path ...string) string {
@@ -449,4 +457,23 @@ func bytesOrPct(rl corev1.ResourceList) string {
 		}
 	}
 	return ""
+}
+
+
+// podsUsingPVC 扫描所有命名空间的 Pod，找出引用了指定 PVC 的（跨 ns 亦可挂载同 ns 的 PVC）
+func (h *Handler) podsUsingPVC(ctx context.Context, ns, pvcName string) []gin.H {
+	out := []gin.H{}
+	podList, err := h.k8s.Clientset.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return out
+	}
+	for _, p := range podList.Items {
+		for _, v := range p.Spec.Volumes {
+			if v.PersistentVolumeClaim != nil && v.PersistentVolumeClaim.ClaimName == pvcName {
+				out = append(out, gin.H{"namespace": p.Namespace, "name": p.Name})
+				break
+			}
+		}
+	}
+	return out
 }

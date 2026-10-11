@@ -238,6 +238,9 @@ import {
 import {
   FORM_KINDS as SIMPLE_KINDS, baseForm, buildFormYaml, parseFormYaml,
 } from '../utils/simpleYaml'
+import {
+  EXTRA_KINDS, baseExtraForm, buildExtraYaml, parseExtraYaml,
+} from '../utils/extraYaml'
 import SimpleResourceForm from './SimpleResourceForm.vue'
 import { fieldHelpFor } from '../utils/fieldHelp'
 
@@ -265,16 +268,17 @@ const simpleForm = ref(null)
 
 // 可表单化的类型
 const FORM_KINDS = ['deployment', 'statefulset']
-const isSimpleKind = computed(() => SIMPLE_KINDS.includes(String(props.kind || '').toLowerCase()))
+const ALL_FORM_KINDS = [...SIMPLE_KINDS, ...EXTRA_KINDS]
+const isSimpleKind = computed(() => ALL_FORM_KINDS.includes(String(props.kind || '').toLowerCase()))
 
 watch(() => props.modelValue, async (v) => {
   visible.value = v
   errorMsg.value = ''
   if (!v) return
 
-  formAvailable.value = FORM_KINDS.includes(props.kind) || SIMPLE_KINDS.includes(String(props.kind || '').toLowerCase())
+  formAvailable.value = FORM_KINDS.includes(props.kind) || ALL_FORM_KINDS.includes(String(props.kind || '').toLowerCase())
   view.value = formAvailable.value ? 'form' : 'yaml'
-  if (isSimpleKind.value) simpleForm.value = baseForm(props.kind, props.namespace || 'default')
+  if (isSimpleKind.value) simpleForm.value = newSimpleForm(props.kind)
 
   if (props.mode === 'edit') {
     try {
@@ -302,7 +306,7 @@ watch(visible, (v) => { if (!v) emit('update:modelValue', false) })
 function syncFormFromYaml() {
   if (!formAvailable.value) return
   if (isSimpleKind.value) {
-    const parsed = parseFormYaml(props.kind, yamlText.value)
+    const parsed = parseSimpleYaml(props.kind, yamlText.value)
     if (parsed) simpleForm.value = parsed
     return
   }
@@ -313,8 +317,19 @@ function syncFormFromYaml() {
   }
 }
 
+function newSimpleForm(kind) {
+  const ns = props.namespace || 'default'
+  return baseForm(kind, ns) || baseExtraForm(kind, ns)
+}
+function buildSimpleYaml(kind, f) {
+  return buildFormYaml(kind, f) || buildExtraYaml(kind, f)
+}
+function parseSimpleYaml(kind, text) {
+  return parseFormYaml(kind, text) || parseExtraYaml(kind, text)
+}
+
 const formYaml = computed(() => buildWorkloadYaml(form.value))
-const simpleFormYaml = computed(() => (simpleForm.value ? buildFormYaml(props.kind, simpleForm.value) : ''))
+const simpleFormYaml = computed(() => (simpleForm.value ? buildSimpleYaml(props.kind, simpleForm.value) : ''))
 
 function probeLabel(k) {
   return { liveness: '存活检查', readiness: '就绪检查', startup: '启动检查' }[k]
@@ -325,8 +340,8 @@ watch(view, (v) => {
   if (isSimpleKind.value) {
     if (v === 'yaml' && simpleForm.value) {
       const built = simpleFormYaml.value
-      const reparsed = parseFormYaml(props.kind, yamlText.value)
-      const same = reparsed && buildFormYaml(props.kind, reparsed).trim() === yamlText.value.trim()
+      const reparsed = parseSimpleYaml(props.kind, yamlText.value)
+      const same = reparsed && buildSimpleYaml(props.kind, reparsed).trim() === yamlText.value.trim()
       if (same || !yamlText.value.trim() || simpleDirty.value) {
         yamlText.value = built
         simpleDirty.value = false

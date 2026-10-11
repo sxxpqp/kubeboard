@@ -46,6 +46,7 @@ func (h *Handler) Register(r *gin.Engine) {
 		api.GET("/workloads", h.listWorkloads)
 		api.GET("/services", h.listServices)
 		api.GET("/services/connectivity", h.serviceConnectivity)
+		api.GET("/service-endpoints", h.ServiceEndpoints)
 		api.GET("/configmaps", h.listConfigMaps)
 		api.GET("/secrets", h.listSecrets)
 		api.GET("/events", h.listEvents)
