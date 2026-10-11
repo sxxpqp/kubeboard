@@ -3,6 +3,9 @@
     <div class="ks-toolbar">
       <el-button :icon="'Back'" @click="$router.push('/namespaces')">返回</el-button>
       <div class="ns-title">项目: {{ ns }}</div>
+      <div style="flex: 1"></div>
+      <el-button type="primary" :icon="'Plus'" @click="deployKind = 'deployment'; deployVisible = true">部署 Deployment</el-button>
+      <el-button type="primary" plain :icon="'Plus'" @click="deployKind = 'statefulset'; deployVisible = true">部署 StatefulSet</el-button>
     </div>
 
     <div class="ks-stat-row" style="margin-bottom: 16px">
@@ -62,6 +65,15 @@
         </el-table-column>
       </el-table>
     </div>
+    <WorkloadDeployDialog
+      v-if="deployVisible"
+      v-model="deployVisible"
+      :default-kind="deployKind"
+      :default-namespace="ns"
+      :namespaces="namespaces"
+      lock-namespace
+      @deployed="reload"
+    />
   </div>
 </template>
 
@@ -69,6 +81,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import http from '../api/http'
+import WorkloadDeployDialog from '../components/WorkloadDeployDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -76,6 +89,9 @@ const ns = route.params.namespace
 const sm = ref({})
 const quotas = ref([])
 const loading = ref(true)
+const deployVisible = ref(false)
+const deployKind = ref('deployment')
+const namespaces = ref([])
 
 const totalWorkloads = computed(() => {
   const w = sm.value.workloads || {}
@@ -86,7 +102,17 @@ function goto(path) {
   router.push({ path, query: { namespace: ns } })
 }
 
+async function reload() {
+  try { namespaces.value = (await http.get('/namespaces')).items.map((i) => i.name) } catch { /* ignore */ }
+  try {
+    sm.value = await http.get(`/namespaces/${ns}/summary`)
+    const q = await http.get('/resourcequotas', { params: { namespace: ns } })
+    quotas.value = q.items || []
+  } catch { /* ignore */ }
+}
+
 onMounted(async () => {
+  try { namespaces.value = (await http.get('/namespaces')).items.map((i) => i.name) } catch { /* ignore */ }
   try {
     sm.value = await http.get(`/namespaces/${ns}/summary`)
     const q = await http.get('/resourcequotas', { params: { namespace: ns } })
