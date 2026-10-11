@@ -10,7 +10,10 @@
         <el-button type="primary" :icon="'Plus'" @click="openCreate(ingressTemplate)">创建</el-button>
         <el-button :icon="'Refresh'" @click="load" />
       </div>
-      <el-table :data="filtered" v-loading="loading" stripe class="ks-table">
+      <el-table
+        :data="filtered" v-loading="loading" stripe class="ks-table"
+        highlight-current-row :row-style="{ cursor: 'pointer' }" @row-click="openDetail"
+      >
         <el-table-column prop="namespace" label="项目" width="130" sortable />
         <el-table-column prop="name" label="名称" min-width="160" sortable>
           <template #default="{ row }"><span class="resource-name">{{ row.name }}</span></template>
@@ -50,10 +53,12 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import http from '../api/http'
 import { useResourceCRUD } from '../api/crud'
 import YamlDialog from '../components/YamlDialog.vue'
 
+const router = useRouter()
 const namespace = ref('')
 const keyword = ref('')
 const items = ref([])
@@ -88,6 +93,10 @@ const {
   dialogVisible, dialogMode, currentName, currentNamespace, currentTemplate,
   openCreate, openEdit, remove,
 } = useResourceCRUD('ingress', load)
+
+function openDetail(row) {
+  router.push(`/detail/ingress/${row.namespace}/${row.name}`)
+}
 
 async function load() {
   loading.value = true

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"sort"
@@ -479,4 +480,75 @@ func revisionImages(raw []byte) []string {
 
 func jsonUnmarshal(data []byte, v interface{}) error {
 	return json.Unmarshal(data, v)
+}
+
+// relatedRef 关联资源引用（含 UID，供事件绑定复用）
+type relatedRef struct {
+	Kind, Namespace, Name, UID string
+}
+
+// collectRelated 收集与某资源关联的下游/上游资源（供 /api/related 与 /api/events/for 复用）
+func (h *Handler) collectRelated(ctx context.Context, kind, ns, name string) []relatedRef {
+	out := []relatedRef{}
+	add := func(k, n, uid string) {
+		out = append(out, relatedRef{Kind: k, Namespace: ns, Name: n, UID: uid})
+	}
+
+	switch kind {
+	case "deployment", "statefulset", "daemonset":
+		var selector *metav1.LabelSelector
+		switch kind {
+		case "deployment":
+			if d, err := h.k8s.Clientset.AppsV1().Deployments(ns).Get(ctx, name, metav1.GetOptions{}); err == nil {
+				selector = d.Spec.Selector
+			}
+		case "statefulset":
+			if st, err := h.k8s.Clientset.AppsV1().StatefulSets(ns).Get(ctx, name, metav1.GetOptions{}); err == nil {
+				selector = st.Spec.Selector
+			}
+		case "daemonset":
+			if ds, err := h.k8s.Clientset.AppsV1().DaemonSets(ns).Get(ctx, name, metav1.GetOptions{}); err == nil {
+				selector = ds.Spec.Selector
+			}
+		}
+		if selector == nil {
+			return out
+		}
+		sel, err := metav1.LabelSelectorAsSelector(selector)
+		if err != nil {
+			return out
+		}
+		// 下游 Pod
+		if pods, err := h.k8s.Clientset.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{LabelSelector: sel.String()}); err == nil {
+			for _, p := range pods.Items {
+				add("Pod", p.Name, string(p.UID))
+			}
+		}
+		// 中间 ReplicaSet（Deployment）
+		if kind == "deployment" {
+			if rss, err := h.k8s.Clientset.AppsV1().ReplicaSets(ns).List(ctx, metav1.ListOptions{LabelSelector: sel.String()}); err == nil {
+				for _, rs := range rss.Items {
+					add("ReplicaSet", rs.Name, string(rs.UID))
+				}
+			}
+		}
+	case "service":
+		if svc, err := h.k8s.Clientset.CoreV1().Services(ns).Get(ctx, name, metav1.GetOptions{}); err == nil {
+			if len(svc.Spec.Selector) > 0 {
+				sel := metav1.FormatLabelSelector(&metav1.LabelSelector{MatchLabels: svc.Spec.Selector})
+				if pods, err := h.k8s.Clientset.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{LabelSelector: sel}); err == nil {
+					for _, p := range pods.Items {
+						add("Pod", p.Name, string(p.UID))
+					}
+				}
+			}
+		}
+	case "node":
+		if pods, err := h.k8s.Clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{FieldSelector: "spec.nodeName=" + name}); err == nil {
+			for _, p := range pods.Items {
+				add("Pod", p.Name, string(p.UID))
+			}
+		}
+	}
+	return out
 }

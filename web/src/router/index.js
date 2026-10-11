@@ -12,6 +12,8 @@ const routes = [
       { path: 'nodes', component: () => import('../views/Nodes.vue'), meta: { title: '节点' } },
       { path: 'namespaces', component: () => import('../views/Namespaces.vue'), meta: { title: '项目' } },
       { path: 'namespaces/:namespace', component: () => import('../views/NamespaceDetail.vue'), meta: { title: '项目详情' } },
+      { path: 'workloads/:kind/:namespace/:name', component: () => import('../views/WorkloadDetail.vue'), meta: { title: '工作负载详情' } },
+      { path: 'detail/:kind/:namespace/:name', component: () => import('../views/GenericDetail.vue'), meta: { title: '资源详情' } },
       { path: 'events', component: () => import('../views/Events.vue'), meta: { title: '事件' } },
       // 应用负载
       { path: 'workloads', component: () => import('../views/Workloads.vue'), meta: { title: '工作负载' } },

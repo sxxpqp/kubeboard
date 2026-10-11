@@ -16,7 +16,10 @@
         <el-button :icon="'Document'" @click="openCreate(workloadTemplate)">YAML 创建</el-button>
         <el-button :icon="'Refresh'" @click="load" />
       </div>
-      <el-table :data="filtered" v-loading="loading" stripe class="ks-table">
+      <el-table
+        :data="filtered" v-loading="loading" stripe class="ks-table"
+        highlight-current-row :row-style="{ cursor: 'pointer' }" @row-click="openDetail"
+      >
         <el-table-column prop="namespace" label="项目" width="130" sortable />
         <el-table-column prop="name" label="名称" min-width="160" sortable>
           <template #default="{ row }"><span class="resource-name">{{ row.name }}</span></template>
@@ -34,16 +37,17 @@
         <el-table-column label="创建时间" width="150" sortable prop="creationTime">
           <template #default="{ row }">{{ fmtTime(row.creationTime) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="400" fixed="right">
+        <el-table-column label="操作" width="460" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="openScale(row)">伸缩</el-button>
-            <el-button link type="primary" size="small" @click="openImage(row)">镜像</el-button>
-            <el-button link type="primary" size="small" @click="openLogs(row)">日志</el-button>
-            <el-button link type="warning" size="small" @click="restart(row)">重启</el-button>
-            <el-button link type="primary" size="small" @click="openRollout(row)">更新状态</el-button>
-            <el-button link type="primary" size="small" @click="openVersions(row)">版本</el-button>
+            <el-button link type="primary" size="small" @click.stop="openScale(row)">伸缩</el-button>
+            <el-button link type="primary" size="small" @click.stop="openImage(row)">镜像</el-button>
+            <el-button link type="primary" size="small" @click.stop="openLogs(row)">日志</el-button>
+            <el-button link type="warning" size="small" @click.stop="restart(row)">重启</el-button>
+            <el-button link type="primary" size="small" @click.stop="openDetail(row)">详情</el-button>
+            <el-button link type="primary" size="small" @click.stop="openRollout(row)">更新状态</el-button>
+            <el-button link type="primary" size="small" @click.stop="openVersions(row)">版本</el-button>
             <el-button link type="primary" size="small" @click="openEdit(row.name, row.namespace)">编辑</el-button>
-            <el-button link type="danger" size="small" @click="remove(row.name, row.namespace)">删除</el-button>
+            <el-button link type="danger" size="small" @click.stop="remove(row.name, row.namespace)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -158,6 +162,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import http from '../api/http'
 import { useResourceCRUD } from '../api/crud'
@@ -166,6 +171,7 @@ import LogViewer from '../components/LogViewer.vue'
 import WorkloadDeployDialog from '../components/WorkloadDeployDialog.vue'
 import VersionHistory from '../components/VersionHistory.vue'
 
+const router = useRouter()
 const kind = ref('deployment')
 const namespace = ref('')
 const keyword = ref('')
@@ -285,6 +291,10 @@ async function doRestart(t) {
   } catch (e) {
     ElMessage.error(e.response?.data?.error || '操作失败')
   } finally { rolloutActing.value = false }
+}
+
+function openDetail(row) {
+  router.push(`/workloads/${kind.value}/${row.namespace}/${row.name}`)
 }
 
 function openVersions(row) {

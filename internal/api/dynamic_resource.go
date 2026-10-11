@@ -32,6 +32,13 @@ var groupVersionKinds = map[string]schema.GroupVersionKind{
 	"pvc":         {Group: "", Version: "v1", Kind: "PersistentVolumeClaim"},
 	"pv":          {Group: "", Version: "v1", Kind: "PersistentVolume"},
 	"storageclass": {Group: "storage.k8s.io", Version: "v1", Kind: "StorageClass"},
+	"node":        {Group: "", Version: "v1", Kind: "Node"},
+	"replicaset":  {Group: "apps", Version: "v1", Kind: "ReplicaSet"},
+	"endpoints":   {Group: "", Version: "v1", Kind: "Endpoints"},
+	"limitrange":  {Group: "", Version: "v1", Kind: "LimitRange"},
+	"hpa":         {Group: "autoscaling", Version: "v2", Kind: "HorizontalPodAutoscaler"},
+	"networkpolicy": {Group: "networking.k8s.io", Version: "v1", Kind: "NetworkPolicy"},
+	"resourcequota": {Group: "", Version: "v1", Kind: "ResourceQuota"},
 }
 
 func (h *Handler) resourceClient(ctx context.Context, gvk schema.GroupVersionKind, namespace string) (dynamic.ResourceInterface, error) {
