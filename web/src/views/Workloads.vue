@@ -56,7 +56,8 @@
 
     <YamlDialog
       v-model="dialogVisible" :mode="dialogMode" :kind="kind"
-      :namespace="currentNamespace" :name="currentName" :template="currentTemplate" @saved="load"
+      :namespace="currentNamespace" :name="currentName" :template="currentTemplate"
+      :namespaces="nsList" @saved="load"
     />
 
     <!-- 伸缩 -->

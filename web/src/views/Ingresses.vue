@@ -46,7 +46,7 @@
       <div class="table-footer">共 {{ filtered.length }} 项</div>
     </div>
 
-    <YamlDialog v-model="dialogVisible" :mode="dialogMode" kind="ingress"
+    <YamlDialog v-model="dialogVisible" :mode="dialogMode" kind="ingress" :namespaces="nsList || []"
       :namespace="currentNamespace" :name="currentName" :template="currentTemplate" @saved="load" />
   </div>
 </template>

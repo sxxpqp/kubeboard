@@ -96,6 +96,7 @@
       :namespace="currentNamespace"
       :name="currentName"
       :template="currentTemplate"
+      :namespaces="nsList"
       @saved="load"
     />
   </div>

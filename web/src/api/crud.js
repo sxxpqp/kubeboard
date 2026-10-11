@@ -9,10 +9,22 @@ export function useResourceCRUD(kind, reloadFn) {
   const currentName = ref('')
   const currentNamespace = ref('')
   const currentTemplate = ref('')
+  const nsList = ref([])
+
+  // 供编辑表单的项目下拉使用
+  async function loadNamespaces() {
+    if (nsList.value.length) return nsList.value
+    try {
+      const r = await http.get('/namespaces')
+      nsList.value = (r.items || []).map((i) => i.name)
+    } catch { /* ignore */ }
+    return nsList.value
+  }
 
   function openCreate(template = '') {
     dialogMode.value = 'create'
     currentTemplate.value = template
+    loadNamespaces()
     dialogVisible.value = true
   }
 
@@ -20,6 +32,7 @@ export function useResourceCRUD(kind, reloadFn) {
     dialogMode.value = 'edit'
     currentName.value = name
     currentNamespace.value = namespace
+    loadNamespaces()
     dialogVisible.value = true
   }
 
@@ -46,6 +59,7 @@ export function useResourceCRUD(kind, reloadFn) {
 
   return {
     dialogVisible, dialogMode, currentName, currentNamespace, currentTemplate,
+    nsList, loadNamespaces,
     openCreate, openEdit, remove,
   }
 }

@@ -79,7 +79,7 @@
       </template>
     </ResourceDetail>
 
-    <YamlDialog v-model="dialogVisible" :mode="dialogMode" kind="pod"
+    <YamlDialog v-model="dialogVisible" :mode="dialogMode" kind="pod" :namespaces="nsList || []"
       :namespace="currentNamespace" :name="currentName" :template="currentTemplate" @saved="load" />
     <LogViewer v-model="logVisible" :namespace="currentNamespace" :pod-name="currentName" :containers="containers" />
     <TerminalView v-model="termVisible" :namespace="currentNamespace" :pod-name="currentName" :containers="containers" />
