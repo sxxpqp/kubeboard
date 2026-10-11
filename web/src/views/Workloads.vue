@@ -12,7 +12,8 @@
         </el-select>
         <el-input v-model="keyword" placeholder="搜索名称" clearable style="width: 200px" :prefix-icon="'Search'" />
         <div style="flex: 1"></div>
-        <el-button type="primary" :icon="'Plus'" @click="openCreate(workloadTemplate)">创建</el-button>
+        <el-button type="primary" :icon="'Plus'" @click="deployVisible = true">部署应用</el-button>
+        <el-button :icon="'Document'" @click="openCreate(workloadTemplate)">YAML 创建</el-button>
         <el-button :icon="'Refresh'" @click="load" />
       </div>
       <el-table :data="filtered" v-loading="loading" stripe class="ks-table">
@@ -33,12 +34,13 @@
         <el-table-column label="创建时间" width="150" sortable prop="creationTime">
           <template #default="{ row }">{{ fmtTime(row.creationTime) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="290" fixed="right">
+        <el-table-column label="操作" width="340" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="openScale(row)">伸缩</el-button>
             <el-button link type="primary" size="small" @click="openImage(row)">镜像</el-button>
             <el-button link type="primary" size="small" @click="openLogs(row)">日志</el-button>
             <el-button link type="warning" size="small" @click="restart(row)">重启</el-button>
+            <el-button link type="primary" size="small" @click="openVersions(row)">版本</el-button>
             <el-button link type="primary" size="small" @click="openEdit(row.name, row.namespace)">编辑</el-button>
             <el-button link type="danger" size="small" @click="remove(row.name, row.namespace)">删除</el-button>
           </template>
@@ -75,6 +77,18 @@
 
     <LogViewer v-model="logVisible" :namespace="target.namespace" :pod-name="target.name" :containers="target.containers" />
 
+    <!-- 表单化部署 -->
+    <WorkloadDeployDialog
+      v-model="deployVisible"
+      :default-kind="kind" :default-namespace="namespace || 'default'"
+      :namespaces="namespaces" @deployed="load"
+    />
+
+    <!-- 版本历史 -->
+    <el-drawer v-model="versionVisible" :title="`版本历史: ${versionTarget.namespace}/${versionTarget.name}`" size="700px">
+      <VersionHistory :kind="kind" :namespace="versionTarget.namespace" :name="versionTarget.name" />
+    </el-drawer>
+
     <!-- 选择 Pod 查看日志 -->
     <el-dialog v-model="podPickerVisible" title="选择 Pod" width="560px">
       <el-table :data="podList" size="small" @row-click="pickPod" style="cursor: pointer">
@@ -92,6 +106,8 @@ import http from '../api/http'
 import { useResourceCRUD } from '../api/crud'
 import YamlDialog from '../components/YamlDialog.vue'
 import LogViewer from '../components/LogViewer.vue'
+import WorkloadDeployDialog from '../components/WorkloadDeployDialog.vue'
+import VersionHistory from '../components/VersionHistory.vue'
 
 const kind = ref('deployment')
 const namespace = ref('')
@@ -101,6 +117,9 @@ const namespaces = ref([])
 const loading = ref(true)
 const acting = ref(false)
 
+const deployVisible = ref(false)
+const versionVisible = ref(false)
+const versionTarget = ref({ namespace: '', name: '' })
 const scaleVisible = ref(false)
 const imageVisible = ref(false)
 const logVisible = ref(false)
@@ -164,6 +183,11 @@ async function doScale() {
   } catch (e) {
     ElMessage.error(e.response?.data?.error || '操作失败')
   } finally { acting.value = false }
+}
+
+function openVersions(row) {
+  versionTarget.value = { namespace: row.namespace, name: row.name }
+  versionVisible.value = true
 }
 
 function openImage(row) {

@@ -57,6 +57,9 @@ func (h *Handler) Register(r *gin.Engine) {
 		api.POST("/workloads/image", h.updateImage)
 		api.POST("/workloads/restart", h.rolloutRestart)
 		api.GET("/workloads/pods", h.workloadPods)
+		api.GET("/workloads/revisions", h.workloadRevisions)
+		api.POST("/workloads/rollback", h.rolloutUndo)
+		api.GET("/related", h.relatedResources)
 		api.GET("/pods/logs", h.podLogs)
 		if h.enableExec {
 			api.GET("/pods/terminal", h.podTerminal)

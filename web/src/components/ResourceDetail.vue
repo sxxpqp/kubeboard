@@ -40,6 +40,42 @@
           </el-descriptions>
         </el-tab-pane>
 
+        <!-- 关联资源（互相跳转） -->
+        <el-tab-pane label="关联资源" name="related">
+          <div v-loading="loadingRelated">
+            <el-alert
+              v-if="!loadingRelated && !relatedGroups.length"
+              type="info" :closable="false" title="未发现关联资源"
+            />
+            <div v-for="g in relatedGroups" :key="g.kind" class="rel-group">
+              <div class="rel-title">{{ g.label }} <span class="muted">({{ g.items.length }})</span></div>
+              <div class="rel-list">
+                <el-tag
+                  v-for="it in g.items" :key="g.kind + it.namespace + it.name"
+                  class="rel-tag" size="default"
+                  :type="g.color" effect="plain"
+                  @click="gotoRelated(it)"
+                >
+                  <span class="rel-name">{{ it.name }}</span>
+                  <span v-if="it.namespace && g.kind !== 'pod'" class="rel-ns">{{ it.namespace }}</span>
+                  <span v-if="it.extra" class="rel-extra">{{ it.extra }}</span>
+                </el-tag>
+              </div>
+            </div>
+          </div>
+        </el-tab-pane>
+
+        <!-- 版本历史（仅 Deployment/StatefulSet） -->
+        <el-tab-pane
+          v-if="supportsRollback" label="版本历史" name="versions"
+        >
+          <VersionHistory
+            ref="versionHist"
+            :kind="kind" :namespace="namespace" :name="name"
+            @rolledback="$emit('rolledback')"
+          />
+        </el-tab-pane>
+
         <!-- 标签 -->
         <el-tab-pane label="标签" name="labels">
           <div class="label-block">
@@ -101,7 +137,11 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import http from '../api/http'
+import VersionHistory from './VersionHistory.vue'
 
 const props = defineProps({
   modelValue: Boolean,
@@ -115,8 +155,56 @@ const props = defineProps({
 })
 const emit = defineEmits(['update:modelValue'])
 
+const router = useRouter()
 const visible = ref(false)
 const activeTab = ref('overview')
+const relatedItems = ref([])
+const loadingRelated = ref(false)
+const versionHist = ref(null)
+
+const supportsRollback = computed(() => ['deployment', 'statefulset'].includes(props.kind))
+
+const KIND_LABELS = {
+  pod: '容器组', node: '节点', service: '服务', ingress: '应用路由',
+  replicaset: '副本集', pvc: '持久卷声明', pv: '持久卷',
+  configmap: '配置字典', secret: '保密字典', configmapRef: '配置字典',
+}
+const KIND_COLORS = {
+  pod: 'primary', node: 'success', service: 'warning', ingress: 'danger',
+  replicaset: 'info', pvc: '', pv: '', configmap: 'info', secret: 'info',
+}
+
+const relatedGroups = computed(() => {
+  const map = {}
+  for (const it of relatedItems.value) {
+    const k = it.kind
+    if (!map[k]) map[k] = { kind: k, label: KIND_LABELS[k] || k, color: KIND_COLORS[k] || 'info', items: [] }
+    // 去重
+    if (!map[k].items.some((x) => x.namespace === it.namespace && x.name === it.name)) {
+      map[k].items.push(it)
+    }
+  }
+  return Object.values(map)
+})
+
+function gotoRelated(it) {
+  const routes = {
+    pod: '/pods', service: '/services', ingress: '/ingresses',
+    node: '/nodes', pvc: '/pvcs', pv: '/pvs',
+    configmap: '/configmaps', secret: '/secrets',
+    replicaset: '/workloads',
+  }
+  const path = routes[it.kind]
+  if (!path) {
+    ElMessage.info(`暂不支持跳转到 ${it.kind}`)
+    return
+  }
+  const query = {}
+  if (it.namespace) query.namespace = it.namespace
+  if (it.kind === 'pod') query.name = it.name
+  router.push({ path, query })
+  visible.value = false
+}
 const loading = ref(false)
 const loadingEvents = ref(false)
 const yamlText = ref('')
@@ -147,6 +235,20 @@ function fmtTime(ts) {
   return ts ? new Date(ts * 1000).toLocaleString() : '-'
 }
 
+async function loadRelated() {
+  loadingRelated.value = true
+  try {
+    const params = { kind: props.kind, name: props.name }
+    if (props.namespace) params.namespace = props.namespace
+    const d = await http.get('/related', { params })
+    relatedItems.value = d.items || []
+  } catch {
+    relatedItems.value = []
+  } finally {
+    loadingRelated.value = false
+  }
+}
+
 async function loadDetail() {
   loading.value = true
   try {
@@ -158,6 +260,7 @@ async function loadDetail() {
   }
   loadYaml()
   loadEvents()
+  loadRelated()
 }
 
 async function loadYaml() {
@@ -201,6 +304,14 @@ defineExpose({ reload: loadDetail })
 .mono-line { font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace; font-size: 12px; line-height: 1.7; }
 .kv-key { color: var(--ks-text-secondary); }
 .muted { color: var(--ks-text-secondary); font-size: 12px; }
+.rel-group { margin-bottom: 18px; }
+.rel-title { font-weight: 600; font-size: 13px; margin-bottom: 8px; }
+.rel-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.rel-tag { cursor: pointer; padding: 4px 10px; }
+.rel-tag:hover { opacity: 0.8; }
+.rel-name { font-weight: 500; }
+.rel-ns { color: var(--ks-text-secondary); font-size: 11px; margin-left: 6px; }
+.rel-extra { color: var(--ks-text-secondary); font-size: 11px; margin-left: 6px; font-style: italic; }
 .label-block { margin-bottom: 20px; }
 .label-title { font-weight: 600; font-size: 13px; margin-bottom: 10px; }
 .yaml-box {
