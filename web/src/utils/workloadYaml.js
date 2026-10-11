@@ -54,158 +54,173 @@ export function baseWorkloadForm(kind = 'deployment', ns = 'default') {
   }
 }
 
-function probeYaml(p) {
-  const lines = []
+function splitScalarToNum(v) {
+  // '80' -> 80；'80%' 保持字符串
+  if (v == null || v === '') return undefined
+  return Number.isNaN(Number(v)) ? v : Number(v)
+}
+
+function buildProbe(p) {
+  const o = {}
   if (p.type === 'httpGet') {
-    lines.push(`    httpGet:`)
-    lines.push(`      path: ${p.path || '/'}`)
-    lines.push(`      port: ${p.port}`)
+    o.httpGet = { path: p.path || '/', port: splitScalarToNum(p.port) }
   } else if (p.type === 'tcpSocket') {
-    lines.push(`    tcpSocket:\n      port: ${p.port}`)
+    o.tcpSocket = { port: splitScalarToNum(p.port) }
   } else {
-    lines.push(`    exec:\n      command: ${JSON.stringify(splitShell(p.command))}`)
+    o.exec = { command: splitShell(p.command) }
   }
-  lines.push(`    initialDelaySeconds: ${p.initialDelaySeconds}`)
-  lines.push(`    periodSeconds: ${p.periodSeconds}`)
-  lines.push(`    timeoutSeconds: ${p.timeoutSeconds}`)
-  lines.push(`    failureThreshold: ${p.failureThreshold}`)
-  return lines.join('\n')
+  o.initialDelaySeconds = Number(p.initialDelaySeconds) || 0
+  o.periodSeconds = Number(p.periodSeconds) || 10
+  o.timeoutSeconds = Number(p.timeoutSeconds) || 1
+  o.failureThreshold = Number(p.failureThreshold) || 3
+  return o
 }
 
-function resourcesYaml(c) {
-  const req = [], lim = []
-  if (c.cpuReq) req.push(`        cpu: ${c.cpuReq}`)
-  if (c.memReq) req.push(`        memory: ${c.memReq}`)
-  if (c.ephemeralReq) req.push(`        ephemeral-storage: ${c.ephemeralReq}`)
-  if (c.cpuLim) lim.push(`        cpu: ${c.cpuLim}`)
-  if (c.memLim) lim.push(`        memory: ${c.memLim}`)
-  if (c.ephemeralLim) lim.push(`        ephemeral-storage: ${c.ephemeralLim}`)
-  let out = ''
-  if (req.length || lim.length) {
-    out += `      resources:\n`
-    if (req.length) out += `        requests:\n${req.join('\n')}\n`
-    if (lim.length) out += `        limits:\n${lim.join('\n')}\n`
-  }
-  return out
-}
-
-function containerYaml(c, indent = '    ') {
-  let y = `${indent}- name: ${c.name || 'app'}\n`
-  y += `${indent}  image: ${c.image || '<image>'}\n`
-  if (c.imagePullPolicy) y += `${indent}  imagePullPolicy: ${c.imagePullPolicy}\n`
+function buildContainer(c) {
+  const o = { name: c.name || 'app', image: c.image || '<image>' }
+  if (c.imagePullPolicy) o.imagePullPolicy = c.imagePullPolicy
   const cmds = splitShell(c.command)
-  if (cmds.length) y += `${indent}  command: ${JSON.stringify(cmds)}\n`
+  if (cmds.length) o.command = cmds
   const args = splitShell(c.args)
-  if (args.length) y += `${indent}  args: ${JSON.stringify(args)}\n`
+  if (args.length) o.args = args
   if (c.ports && c.ports.length) {
-    y += `${indent}  ports:\n`
-    for (const p of c.ports) {
-      y += `${indent}    - containerPort: ${p.containerPort}\n`
-      if (p.name) y += `${indent}      name: ${p.name}\n`
-      y += `${indent}      protocol: ${p.protocol}\n`
-    }
+    o.ports = c.ports.map((p) => {
+      const port = { containerPort: Number(p.containerPort) }
+      if (p.name) port.name = p.name
+      port.protocol = p.protocol || 'TCP'
+      return port
+    })
   }
   const env = kvToObj(c.env)
   if (Object.keys(env).length) {
-    y += `${indent}  env:\n`
-    for (const [k, v] of Object.entries(env)) y += `${indent}    - name: ${k}\n${indent}      value: ${JSON.stringify(v)}\n`
+    o.env = Object.entries(env).map(([name, value]) => ({ name, value: String(value) }))
   }
-  const res = resourcesYaml(c)
-  if (res) y += res
-  for (const [pname, p] of Object.entries(c.probes || {})) {
-    if (p.enabled) y += `${indent}  ${pname}Probe:\n${probeYaml(p)}\n`
+  const req = {}, lim = {}
+  if (c.cpuReq) req.cpu = c.cpuReq
+  if (c.memReq) req.memory = c.memReq
+  if (c.ephemeralReq) req['ephemeral-storage'] = c.ephemeralReq
+  if (c.cpuLim) lim.cpu = c.cpuLim
+  if (c.memLim) lim.memory = c.memLim
+  if (c.ephemeralLim) lim['ephemeral-storage'] = c.ephemeralLim
+  if (Object.keys(req).length || Object.keys(lim).length) {
+    o.resources = {}
+    if (Object.keys(req).length) o.resources.requests = req
+    if (Object.keys(lim).length) o.resources.limits = lim
   }
-  return y
-}
-
-function volumesYaml(f) {
-  if (!f.volumes || !f.volumes.length) return ''
-  let y = `      volumes:\n`
-  for (const v of f.volumes) {
-    y += `        - name: ${v.name}\n`
-    if (v.type === 'pvc') y += `          persistentVolumeClaim:\n            claimName: ${v.source || v.name}\n`
-    else if (v.type === 'configMap') y += `          configMap:\n            name: ${v.source}\n`
-    else if (v.type === 'secret') y += `          secret:\n            secretName: ${v.source}\n`
-    else if (v.type === 'hostPath') y += `          hostPath:\n            path: ${v.source}\n`
-    else if (v.type === 'emptyDir') y += `          emptyDir: {}\n`
+  for (const pname of ['liveness', 'readiness', 'startup']) {
+    const p = c.probes?.[pname]
+    if (p?.enabled) o[`${pname}Probe`] = buildProbe(p)
   }
-  return y
-}
-
-function mountsYaml(f) {
-  if (!f.volumes || !f.volumes.length) return ''
-  return f.volumes
-    .map((v) => `        - name: ${v.name}\n          mountPath: ${v.mountPath}${v.readOnly ? '\n          readOnly: true' : ''}`)
-    .join('\n')
+  return o
 }
 
 export function buildWorkloadYaml(f) {
+  if (!f || typeof f !== 'object') return ''
   const kindName = f.kind === 'statefulset' ? 'StatefulSet' : 'Deployment'
   const labels = kvToObj(f.labels)
   const appLabel = labels.app || f.name || '<name>'
   const annotations = kvToObj(f.annotations)
   if (f.description) annotations['kubesphere.io/description'] = f.description
 
-  let meta = `  name: ${f.name || '<name>'}\n  namespace: ${f.namespace}\n`
-  if (Object.keys(labels).length) {
-    meta += `  labels:\n` + Object.entries(labels).map(([k, v]) => `    ${k}: ${v}`).join('\n') + '\n'
+  const meta = { name: f.name || '<name>', namespace: f.namespace }
+  if (Object.keys(labels).length) meta.labels = { ...labels }
+  if (Object.keys(annotations).length) meta.annotations = { ...annotations }
+
+  const podSpec = { containers: f.containers.map(buildContainer) }
+
+  // 卷 -> spec.volumes；挂载 -> 每个容器 volumeMounts
+  const mounts = []
+  if (f.volumes && f.volumes.length) {
+    podSpec.volumes = f.volumes.map((v) => {
+      const vol = { name: v.name }
+      if (v.type === 'pvc') vol.persistentVolumeClaim = { claimName: v.source || v.name }
+      else if (v.type === 'configMap') vol.configMap = { name: v.source }
+      else if (v.type === 'secret') vol.secret = { secretName: v.source }
+      else if (v.type === 'hostPath') vol.hostPath = { path: v.source }
+      else if (v.type === 'emptyDir') vol.emptyDir = {}
+      if (v.mountPath) {
+        const m = { name: v.name, mountPath: v.mountPath }
+        if (v.readOnly) m.readOnly = true
+        mounts.push(m)
+      }
+      return vol
+    })
   }
-  if (Object.keys(annotations).length) {
-    meta += `  annotations:\n` + Object.entries(annotations).map(([k, v]) => `    ${k}: ${JSON.stringify(v)}`).join('\n') + '\n'
+  if (mounts.length) {
+    // 挂载注入到第一个容器（表单以单挂载点为准；多容器共享同一挂载时按第一个容器处理）
+    podSpec.containers[0].volumeMounts = [...mounts]
   }
 
-  let spec = ''
-  if (f.kind === 'statefulset') spec += `  serviceName: ${f.serviceName || f.name || '<name>'}\n`
-  spec += `  replicas: ${f.replicas}\n`
-  spec += `  selector:\n    matchLabels:\n      app: ${appLabel}\n`
-  if (f.strategy && f.kind === 'deployment') {
-    spec += `  strategy:\n    type: ${f.strategy}\n`
-    if (f.strategy === 'RollingUpdate') {
-      spec += `    rollingUpdate:\n      maxSurge: ${f.maxSurge}\n      maxUnavailable: ${f.maxUnavailable}\n`
-    }
-  }
-  spec += `  template:\n    metadata:\n      labels:\n        app: ${appLabel}\n`
-  spec += `    spec:\n`
   if (f.imagePullSecrets) {
-    spec += `      imagePullSecrets:\n` + f.imagePullSecrets.split(',').map((s) => `        - name: ${s.trim()}`).join('\n') + '\n'
+    podSpec.imagePullSecrets = f.imagePullSecrets.split(',').map((s) => ({ name: s.trim() })).filter((x) => x.name)
   }
-  if (f.serviceAccount) spec += `      serviceAccountName: ${f.serviceAccount}\n`
-  if (f.restartPolicy) spec += `      restartPolicy: ${f.restartPolicy}\n`
+  if (f.serviceAccount) podSpec.serviceAccountName = f.serviceAccount
+  if (f.restartPolicy) podSpec.restartPolicy = f.restartPolicy
   const nsSel = kvToObj(f.nodeSelector)
-  if (Object.keys(nsSel).length) spec += `      nodeSelector:\n` + Object.entries(nsSel).map(([k, v]) => `        ${k}: ${v}`).join('\n') + '\n'
+  if (Object.keys(nsSel).length) podSpec.nodeSelector = { ...nsSel }
   const tol = kvToObj(f.tolerations)
   if (Object.keys(tol).length) {
-    spec += `      tolerations:\n` + Object.entries(tol).map(([k, v]) => `        - key: ${k}\n          operator: Equal\n          value: ${v}\n          effect: NoSchedule`).join('\n') + '\n'
+    podSpec.tolerations = Object.entries(tol).map(([key, value]) => ({
+      key, operator: 'Equal', value, effect: 'NoSchedule',
+    }))
   }
-  const vol = volumesYaml(f)
-  if (vol) spec += vol
 
-  const mounts = mountsYaml(f)
-  spec += `      containers:\n`
-  for (const c of f.containers) {
-    let cy = containerYaml(c, '      ')
-    // 把 volumeMounts 注入容器（放在 resources 之后、probe 之前的位置即可，K8s 不要求顺序）
-    if (mounts) {
-      const idx = cy.lastIndexOf('\n', cy.length - 2) + 1
-      cy = cy.slice(0, idx) + `      volumeMounts:\n` + mounts.replace(/^ {8}/gm, '        ') + '\n' + cy.slice(idx)
+  const spec = {}
+  if (f.kind === 'statefulset') spec.serviceName = f.serviceName || f.name || '<name>'
+  spec.replicas = Number(f.replicas) || 0
+  spec.selector = { matchLabels: { app: appLabel } }
+  if (f.kind === 'deployment') {
+    if (f.strategy) spec.strategy = { type: f.strategy }
+    if (f.strategy === 'RollingUpdate' && (f.maxSurge || f.maxUnavailable)) {
+      spec.strategy.rollingUpdate = {}
+      if (f.maxSurge) spec.strategy.rollingUpdate.maxSurge = f.maxSurge
+      if (f.maxUnavailable) spec.strategy.rollingUpdate.maxUnavailable = f.maxUnavailable
     }
-    spec += cy
   }
-
+  spec.template = { metadata: { labels: { app: appLabel } }, spec: podSpec }
   if (f.kind === 'statefulset' && f.storageSize) {
-    spec += `  volumeClaimTemplates:\n    - metadata:\n        name: data\n      spec:\n        accessModes: [ReadWriteOnce]\n        resources:\n          requests:\n            storage: ${f.storageSize}\n`
-    if (f.storageClass) spec += `        storageClassName: ${f.storageClass}\n`
+    const vctSpec = {
+      accessModes: ['ReadWriteOnce'],
+      resources: { requests: { storage: f.storageSize } },
+    }
+    if (f.storageClass) vctSpec.storageClassName = f.storageClass
+    spec.volumeClaimTemplates = [{ metadata: { name: 'data' }, spec: vctSpec }]
   }
 
-  let docs = `apiVersion: apps/v1\nkind: ${kindName}\nmetadata:\n${meta}spec:\n${spec}`
+  const docs = [{ apiVersion: 'apps/v1', kind: kindName, metadata: meta, spec }]
 
   if (f.createService) {
-    docs += `\n---\napiVersion: v1\nkind: Service\nmetadata:\n  name: ${f.svcName || f.name}\n  namespace: ${f.namespace}\nspec:\n  type: ${f.svcType}\n  selector:\n    app: ${appLabel}\n  ports:\n    - port: ${f.svcPort}\n      targetPort: ${f.svcTargetPort}\n      protocol: TCP\n`
+    const svc = {
+      apiVersion: 'v1',
+      kind: 'Service',
+      metadata: { name: f.svcName || f.name, namespace: f.namespace },
+      spec: {
+        type: f.svcType || 'ClusterIP',
+        selector: { app: appLabel },
+        ports: [{ port: Number(f.svcPort) || 80, targetPort: Number(f.svcTargetPort) || 80, protocol: 'TCP' }],
+      },
+    }
+    docs.push(svc)
   }
   if (f.createHPA) {
-    docs += `\n---\napiVersion: autoscaling/v2\nkind: HorizontalPodAutoscaler\nmetadata:\n  name: ${f.name}-hpa\n  namespace: ${f.namespace}\nspec:\n  scaleTargetRef:\n    apiVersion: apps/v1\n    kind: ${kindName}\n    name: ${f.name}\n  minReplicas: ${f.hpaMin}\n  maxReplicas: ${f.hpaMax}\n  metrics:\n    - type: Resource\n      resource:\n        name: cpu\n        target:\n          type: Utilization\n          averageUtilization: ${f.hpaCPU}\n`
+    const hpa = {
+      apiVersion: 'autoscaling/v2',
+      kind: 'HorizontalPodAutoscaler',
+      metadata: { name: `${f.name}-hpa`, namespace: f.namespace },
+      spec: {
+        scaleTargetRef: { apiVersion: 'apps/v1', kind: kindName, name: f.name },
+        minReplicas: Number(f.hpaMin) || 1,
+        maxReplicas: Number(f.hpaMax) || 5,
+        metrics: [{
+          type: 'Resource',
+          resource: { name: 'cpu', target: { type: 'Utilization', averageUtilization: Number(f.hpaCPU) || 70 } },
+        }],
+      },
+    }
+    docs.push(hpa)
   }
-  return docs
+
+  return docs.map((d) => dumpYaml(d).trimEnd()).join('\n---\n')
 }
 
 // ---------- YAML -> 表单（供编辑模式回填）----------
@@ -304,10 +319,23 @@ export function parseWorkloadYaml(yamlText) {
   }
 
   // 卷 & 挂载
-  const vols = podSpec.volumes || []
+  const vols = [...(podSpec.volumes || [])]
   const mountByVol = {}
   for (const c of cs) {
     for (const m of c.volumeMounts || []) mountByVol[m.name] = m
+  }
+  // volumeClaimTemplates（StatefulSet）：作为 pvc 类型卷入列
+  for (const vct of doc.spec?.volumeClaimTemplates || []) {
+    const name = vct?.metadata?.name
+    if (name && !vols.some((v) => v.name === name)) {
+      vols.push({ name, persistentVolumeClaim: { claimName: name } })
+    }
+  }
+  // 仅有 volumeMounts、无对应卷定义的（如 STS 模板卷）也补进来，避免挂载信息丢失
+  for (const [name, m] of Object.entries(mountByVol)) {
+    if (!vols.some((v) => v?.name === name)) {
+      vols.push({ name, __mountOnly: true })
+    }
   }
   f.volumes = vols.map((v) => {
     const vol = emptyVol()
@@ -317,6 +345,7 @@ export function parseWorkloadYaml(yamlText) {
     else if (v.secret) { vol.type = 'secret'; vol.source = v.secret.secretName || '' }
     else if (v.hostPath) { vol.type = 'hostPath'; vol.source = v.hostPath.path || '' }
     else if (v.emptyDir) { vol.type = 'emptyDir'; vol.source = '' }
+    else if (v.__mountOnly) { vol.type = 'emptyDir'; vol.source = '' } // 仅有挂载的模板卷
     const m = mountByVol[v.name]
     if (m) { vol.mountPath = m.mountPath || ''; vol.readOnly = !!m.readOnly }
     return vol
