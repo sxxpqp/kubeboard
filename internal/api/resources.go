@@ -150,6 +150,7 @@ func (h *Handler) listWorkloads(c *gin.Context) {
 
 func (h *Handler) listPods(c *gin.Context) {
 	ns := c.Query("namespace")
+	nodeFilter := c.Query("node")
 	pods, err := h.k8s.Clientset.CoreV1().Pods(ns).List(c.Request.Context(), metav1.ListOptions{})
 	if err != nil {
 		c.JSON(httpStatus(err), gin.H{"error": err.Error()})
@@ -157,6 +158,9 @@ func (h *Handler) listPods(c *gin.Context) {
 	}
 	items := make([]gin.H, 0, len(pods.Items))
 	for _, p := range pods.Items {
+		if nodeFilter != "" && p.Spec.NodeName != nodeFilter {
+			continue
+		}
 		restarts := int32(0)
 		for _, cs := range p.Status.ContainerStatuses {
 			restarts += cs.RestartCount

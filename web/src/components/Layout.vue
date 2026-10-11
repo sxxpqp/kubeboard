@@ -33,6 +33,17 @@
     <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden">
       <header class="ks-header">
         <div class="crumb">{{ route.meta.title || 'Kubeboard' }}</div>
+        <el-tooltip :content="autoRefresh.enabled.value ? '自动刷新已开启' : '自动刷新已关闭'" placement="bottom">
+          <el-switch
+            v-model="autoRefreshSwitch"
+            size="small"
+            inline-prompt
+            active-text="自动"
+            inactive-text="手动"
+            style="margin-right: 18px"
+            @change="onAutoRefreshChange"
+          />
+        </el-tooltip>
         <el-dropdown @command="onCommand">
           <span style="cursor: pointer; display: flex; align-items: center; gap: 6px">
             <el-avatar :size="28" style="background: var(--ks-primary)">{{ avatarChar }}</el-avatar>
@@ -56,10 +67,17 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import http from '../api/http'
+import { useAutoRefreshSettings } from '../composables/useAutoRefresh'
 
 const route = useRoute()
 const router = useRouter()
 const clusterVersion = ref('')
+const autoRefresh = useAutoRefreshSettings()
+const autoRefreshSwitch = ref(autoRefresh.enabled.value)
+
+function onAutoRefreshChange(v) {
+  autoRefresh.setEnabled(v)
+}
 
 const collapsed = reactive({
   集群管理: false,

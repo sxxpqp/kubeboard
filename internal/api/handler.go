@@ -34,6 +34,7 @@ func (h *Handler) Register(r *gin.Engine) {
 	{
 		api.GET("/overview", h.overview)
 		api.GET("/nodes", h.listNodes)
+		api.POST("/nodes/cordon", h.cordonNode)
 		api.GET("/namespaces", h.listNamespaces)
 		api.GET("/workloads", h.listWorkloads)
 		api.GET("/services", h.listServices)
@@ -147,6 +148,7 @@ func (h *Handler) listNodes(c *gin.Context) {
 			"creationTime": n.CreationTimestamp.Unix(),
 			"cpu":         n.Status.Capacity.Cpu().String(),
 			"memory":      n.Status.Capacity.Memory().String(),
+			"unschedulable": n.Spec.Unschedulable,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items, "total": len(items)})

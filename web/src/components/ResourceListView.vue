@@ -15,7 +15,11 @@
         <el-button :icon="'Refresh'" @click="load" />
       </div>
 
-      <el-table :data="filtered" v-loading="loading" stripe class="ks-table">
+      <el-table
+        :data="filtered" v-loading="loading" stripe class="ks-table"
+        :highlight-current-row="detailEnabled" :row-style="detailEnabled ? { cursor: 'pointer' } : undefined"
+        @row-click="detailEnabled && onRowClick($event)"
+      >
         <el-table-column
           v-for="col in columns" :key="col.prop"
           :prop="col.prop" :label="col.label"
@@ -53,6 +57,17 @@
       <div class="table-footer">共 {{ filtered.length }} 项</div>
     </div>
 
+    <ResourceDetail
+      v-if="detailEnabled"
+      v-model="detailVisible"
+      :title="`${detailKind || kind}: ${detailRow.name}`"
+      :kind="detailKind || kind"
+      :namespace="detailRow.namespace || ''"
+      :name="detailRow.name || ''"
+      :fields="detailFields"
+      :load-detail="loadDetail"
+    />
+
     <YamlDialog
       v-if="creatable || editable"
       v-model="dialogVisible" :mode="dialogMode" :kind="kind"
@@ -67,6 +82,7 @@ import { computed, onMounted, ref } from 'vue'
 import http from '../api/http'
 import { useResourceCRUD } from '../api/crud'
 import YamlDialog from './YamlDialog.vue'
+import ResourceDetail from './ResourceDetail.vue'
 
 const props = defineProps({
   kind: { type: String, required: true },
@@ -80,6 +96,9 @@ const props = defineProps({
   template: { type: String, default: '' },
   opsWidth: { type: Number, default: 140 },
   filterFn: { type: Function, default: null },
+  detailEnabled: { type: Boolean, default: false },
+  detailKind: { type: String, default: '' },
+  detailFields: { type: Array, default: () => [] },
 })
 
 const emit = defineEmits(['loaded'])
@@ -89,6 +108,18 @@ const keyword = ref('')
 const items = ref([])
 const namespaces = ref([])
 const loading = ref(true)
+const detailVisible = ref(false)
+const detailRow = ref({})
+
+function onRowClick(row) {
+  detailRow.value = row
+  detailVisible.value = true
+}
+
+// 默认详情加载：直接返回列表行数据；页面可用 :detail-loader 覆盖
+async function loadDetail() {
+  return detailRow.value
+}
 
 const filtered = computed(() => {
   let list = items.value

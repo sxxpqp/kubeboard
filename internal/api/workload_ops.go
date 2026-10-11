@@ -226,3 +226,28 @@ func (h *Handler) rolloutRestart(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"restarted": req.Name})
 }
+
+// cordonNode 封锁/解除封锁节点调度（对应 kubectl cordon/uncordon）
+func (h *Handler) cordonNode(c *gin.Context) {
+	var req struct {
+		Name          string `json:"name" binding:"required"`
+		Unschedulable bool   `json:"unschedulable"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	ctx := c.Request.Context()
+
+	node, err := h.k8s.Clientset.CoreV1().Nodes().Get(ctx, req.Name, metav1.GetOptions{})
+	if err != nil {
+		c.JSON(httpStatus(err), gin.H{"error": err.Error()})
+		return
+	}
+	node.Spec.Unschedulable = req.Unschedulable
+	if _, err := h.k8s.Clientset.CoreV1().Nodes().Update(ctx, node, metav1.UpdateOptions{}); err != nil {
+		c.JSON(httpStatus(err), gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"name": req.Name, "unschedulable": req.Unschedulable})
+}

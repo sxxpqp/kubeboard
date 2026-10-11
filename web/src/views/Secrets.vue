@@ -1,6 +1,7 @@
 <template>
   <ResourceListView
-    kind="secret" endpoint="/secrets" :columns="columns" :template="template"
+    detail-enabled
+    kind="secret" endpoint="/secrets" :columns="columns" :detail-fields="detailFields" :template="template"
   />
 </template>
 
@@ -13,6 +14,14 @@ const columns = [
   { prop: 'type', label: '类型', width: 210 },
   { prop: 'keys', label: '数据键', type: 'tags', minWidth: 240 },
   { prop: 'creationTime', label: '创建时间', type: 'time', width: 150, sortable: true },
+]
+
+const detailFields = [
+  { key: 'namespace', label: '项目' },
+  { key: 'name', label: '名称' },
+  { key: 'type', label: '类型' },
+  { key: 'keys', label: '数据键', type: 'tags' },
+  { key: 'creationTime', label: '创建时间', type: 'time' },
 ]
 
 const template = `apiVersion: v1

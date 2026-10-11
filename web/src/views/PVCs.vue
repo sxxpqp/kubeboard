@@ -1,6 +1,7 @@
 <template>
   <ResourceListView
-    kind="pvc" endpoint="/pvcs" :columns="columns" :template="template"
+    detail-enabled
+    kind="pvc" endpoint="/pvcs" :columns="columns" :detail-fields="detailFields" :template="template"
   />
 </template>
 
@@ -15,6 +16,17 @@ const columns = [
   { prop: 'accessModes', label: '访问模式', type: 'tags', minWidth: 200 },
   { prop: 'storageClass', label: '存储类', width: 140 },
   { prop: 'creationTime', label: '创建时间', type: 'time', width: 150, sortable: true },
+]
+
+const detailFields = [
+  { key: 'namespace', label: '项目' },
+  { key: 'name', label: '名称' },
+  { key: 'status', label: '状态', type: 'status' },
+  { key: 'capacity', label: '容量' },
+  { key: 'accessModes', label: '访问模式', type: 'tags' },
+  { key: 'storageClass', label: '存储类' },
+  { key: 'volumeName', label: '绑定 PV' },
+  { key: 'creationTime', label: '创建时间', type: 'time' },
 ]
 
 const template = `apiVersion: v1
