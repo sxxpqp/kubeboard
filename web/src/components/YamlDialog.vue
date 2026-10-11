@@ -20,8 +20,22 @@
       </span>
     </div>
 
-    <!-- ============ 表单模式（仅工作负载）============ -->
-    <div v-if="view === 'form'" class="form-wrap">
+    <!-- ============ 表单模式：简单资源（Service/ConfigMap/Secret）============ -->
+    <div v-if="view === 'form' && isSimpleKind" class="form-wrap">
+      <el-form label-width="130px" label-position="right" size="default" class="simple-form-scroll">
+        <SimpleResourceForm :kind="kind" v-model="simpleForm" :namespaces="namespaces" />
+      </el-form>
+      <div class="yaml-preview-wrap">
+        <div class="preview-head">
+          <span>YAML 预览</span>
+          <el-button link type="primary" size="small" @click="view = 'yaml'">在 YAML 中编辑</el-button>
+        </div>
+        <pre class="yaml-preview">{{ simpleFormYaml }}</pre>
+      </div>
+    </div>
+
+    <!-- ============ 表单模式（工作负载）============ -->
+    <div v-else-if="view === 'form'" class="form-wrap">
       <el-form :model="form" label-width="130px" label-position="right" size="default">
         <el-collapse v-model="openSections">
           <el-collapse-item name="basic">
@@ -202,7 +216,8 @@
     </div>
 
     <template #footer>
-      <span v-if="view === 'form'" class="foot-note">表单未覆盖的字段（如 affinity、securityContext）请切到 YAML 模式编辑</span>
+      <span v-if="view === 'form' && !isSimpleKind" class="foot-note">表单未覆盖的字段（如 affinity、securityContext）请切到 YAML 模式编辑</span>
+      <span v-else-if="view === 'form' && isSimpleKind" class="foot-note">表单未覆盖的字段请切到 YAML 模式编辑</span>
       <el-button @click="visible = false">取消</el-button>
       <el-button type="primary" :loading="saving" @click="save">
         {{ mode === 'create' ? '创建' : '保存' }}
@@ -220,6 +235,10 @@ import {
   baseWorkloadForm, buildWorkloadYaml, parseWorkloadYaml,
   emptyCtr, emptyVol,
 } from '../utils/workloadYaml'
+import {
+  FORM_KINDS as SIMPLE_KINDS, baseForm, buildFormYaml, parseFormYaml,
+} from '../utils/simpleYaml'
+import SimpleResourceForm from './SimpleResourceForm.vue'
 import { fieldHelpFor } from '../utils/fieldHelp'
 
 const props = defineProps({
@@ -242,17 +261,20 @@ const errorMsg = ref('')
 const openSections = ref(['basic', 'containers'])
 const helpCollapsed = ref(false)
 const formAvailable = ref(false)
+const simpleForm = ref(null)
 
 // 可表单化的类型
 const FORM_KINDS = ['deployment', 'statefulset']
+const isSimpleKind = computed(() => SIMPLE_KINDS.includes(String(props.kind || '').toLowerCase()))
 
 watch(() => props.modelValue, async (v) => {
   visible.value = v
   errorMsg.value = ''
   if (!v) return
 
-  formAvailable.value = FORM_KINDS.includes(props.kind)
+  formAvailable.value = FORM_KINDS.includes(props.kind) || SIMPLE_KINDS.includes(String(props.kind || '').toLowerCase())
   view.value = formAvailable.value ? 'form' : 'yaml'
+  if (isSimpleKind.value) simpleForm.value = baseForm(props.kind, props.namespace || 'default')
 
   if (props.mode === 'edit') {
     try {
@@ -279,6 +301,11 @@ watch(visible, (v) => { if (!v) emit('update:modelValue', false) })
 
 function syncFormFromYaml() {
   if (!formAvailable.value) return
+  if (isSimpleKind.value) {
+    const parsed = parseFormYaml(props.kind, yamlText.value)
+    if (parsed) simpleForm.value = parsed
+    return
+  }
   const parsed = parseWorkloadYaml(yamlText.value)
   if (parsed) {
     // 保留用户可能已改的 ns
@@ -287,6 +314,7 @@ function syncFormFromYaml() {
 }
 
 const formYaml = computed(() => buildWorkloadYaml(form.value))
+const simpleFormYaml = computed(() => (simpleForm.value ? buildFormYaml(props.kind, simpleForm.value) : ''))
 
 function probeLabel(k) {
   return { liveness: '存活检查', readiness: '就绪检查', startup: '启动检查' }[k]
@@ -294,6 +322,20 @@ function probeLabel(k) {
 
 // 表单 -> YAML：切到 YAML 模式时把表单结果写回
 watch(view, (v) => {
+  if (isSimpleKind.value) {
+    if (v === 'yaml' && simpleForm.value) {
+      const built = simpleFormYaml.value
+      const reparsed = parseFormYaml(props.kind, yamlText.value)
+      const same = reparsed && buildFormYaml(props.kind, reparsed).trim() === yamlText.value.trim()
+      if (same || !yamlText.value.trim() || simpleDirty.value) {
+        yamlText.value = built
+        simpleDirty.value = false
+      }
+    } else if (v === 'form') {
+      syncFormFromYaml()
+    }
+    return
+  }
   if (v === 'yaml' && formAvailable.value) {
     const built = formYaml.value
     // 只在表单内容确实变化时覆盖，避免抹掉手工编辑的额外字段
@@ -311,6 +353,8 @@ watch(view, (v) => {
 
 const formDirty = ref(false)
 watch(form, () => { if (view.value === 'form') formDirty.value = true }, { deep: true })
+const simpleDirty = ref(false)
+watch(simpleForm, () => { if (view.value === 'form') simpleDirty.value = true }, { deep: true })
 
 const helpKindLabel = computed(() => {
   const map = {
@@ -328,7 +372,9 @@ async function save() {
   saving.value = true
   errorMsg.value = ''
   try {
-    const payload = view.value === 'form' ? formYaml.value : yamlText.value
+    const payload = view.value === 'form'
+      ? (isSimpleKind.value ? simpleFormYaml.value : formYaml.value)
+      : yamlText.value
     await http({
       method: props.mode === 'create' ? 'post' : 'put',
       url: '/resources',
