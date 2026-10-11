@@ -49,6 +49,7 @@ func (h *Handler) Register(r *gin.Engine) {
 		api.GET("/secrets", h.listSecrets)
 		api.GET("/events", h.listEvents)
 		api.GET("/pods", h.listPods)
+		api.GET("/pods/detail", h.podDetail)
 		api.GET("/resource", h.getResource)
 		api.POST("/resources", h.createResource)
 		api.PUT("/resources", h.updateResource)

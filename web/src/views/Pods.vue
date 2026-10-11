@@ -58,8 +58,11 @@
       :title="`容器组: ${detailRow.namespace}/${detailRow.name}`"
       kind="pod" :namespace="detailRow.namespace || ''" :name="detailRow.name || ''"
       :fields="detailFields" :load-detail="loadPodDetail"
-      :extra-tabs="[{ name: 'monitor', label: '监控' }]"
+      :extra-tabs="[{ name: 'lifecycle', label: '生命周期' }, { name: 'monitor', label: '监控' }]"
     >
+      <template #tab-lifecycle>
+        <PodLifecycle v-if="detailRow.name" :namespace="detailRow.namespace" :name="detailRow.name" />
+      </template>
       <template #tab-monitor>
         <div v-if="podMetric(detailRow)">
           <div class="metric-head"><span>CPU 用量</span><b>{{ podMetric(detailRow).cpuCores }}</b></div>
@@ -92,6 +95,7 @@ import LogViewer from '../components/LogViewer.vue'
 import TerminalView from '../components/TerminalView.vue'
 import ResourceDetail from '../components/ResourceDetail.vue'
 import { usePodMetrics } from '../composables/useMetrics'
+import PodLifecycle from '../components/PodLifecycle.vue'
 
 const namespace = ref('')
 const keyword = ref('')
