@@ -1,0 +1,122 @@
+# Kubeboard 部署清单（最小权限模型）
+#
+# 依赖：先应用 rbac.yaml 创建 ServiceAccount 与分层 ClusterRole。
+#
+# 注意：不要把 jwt-secret / admin-password 硬编码进本文件提交到仓库。
+# 生产环境用 Secret 注入，或通过环境变量 KUBEBOARD_JWT_SECRET /
+# KUBEBOARD_ADMIN_PASSWORD 覆盖。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubeboard
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kubeboard-secret
+  namespace: kubeboard
+type: Opaque
+stringData:
+  # 强烈建议：部署前替换为随机值。默认值仅用于本地开发。
+  # 生成：openssl rand -base64 32
+  jwt-secret: "REPLACE_ME_WITH_RANDOM_SECRET"
+  admin-password: "REPLACE_ME_WITH_STRONG_PASSWORD"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubeboard
+  namespace: kubeboard
+  labels:
+    app: kubeboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubeboard
+  template:
+    metadata:
+      labels:
+        app: kubeboard
+    spec:
+      serviceAccountName: kubeboard   # 与 rbac.yaml 中的 SA 对应
+      containers:
+        - name: kubeboard
+          image: ghcr.io/sxxpqp/kubeboard:latest
+          args:
+            - --listen=:9090
+            - --static=/app/web
+            # 终端默认关闭；确认已绑定 kubeboard-exec ClusterRole 后再打开
+            # - --enable-exec
+          env:
+            - name: KUBEBOARD_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: kubeboard-secret
+                  key: jwt-secret
+            - name: KUBEBOARD_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kubeboard-secret
+                  key: admin-password
+          ports:
+            - name: http
+              containerPort: 9090
+          readinessProbe:
+            httpGet:
+              path: /api/version
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/version
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubeboard
+  namespace: kubeboard
+spec:
+  selector:
+    app: kubeboard
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kubeboard
+  namespace: kubeboard
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: kubeboard.example.com   # 按需替换
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kubeboard
+                port:
+                  number: 80

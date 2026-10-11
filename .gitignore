@@ -1,0 +1,28 @@
+# 编译产物
+/kubeboard
+/dist/
+*.exe
+
+# 前端依赖与构建
+web/node_modules/
+web/dist/
+
+# 编辑器与系统
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Go 测试/覆盖率
+*.test
+*.out
+coverage.txt
+
+# 本地环境
+.env
+.env.local
+*.local.yaml
+
+# Go 构建临时目录
+cmd/**/tmp/
+**/runner-build

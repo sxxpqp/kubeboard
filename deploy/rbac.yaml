@@ -1,0 +1,135 @@
+# Kubeboard 最小权限模型（RBAC 方案 a）
+#
+# 设计目标：默认部署只读，写操作按能力分层显式授予，exec（终端）默认不启用。
+#
+#   ClusterRole/kubeboard-reader   : 只读所有资源（默认授予）
+#   ClusterRole/kubeboard-operator : 写操作（scale/restart/image/delete/create/update）
+#                                    但**不含** pods/exec、不含 RBAC/CRD 写权限
+#   ClusterRole/kubeboard-exec     : 仅 pods/exec，配合 --enable-exec 使用
+#
+# 按需组合 RoleBinding：只读场景仅绑 reader；需要运维再加 operator；
+# 需要终端再加 exec。三者互不依赖，最小权限可逐级放开。
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubeboard
+  namespace: kubeboard
+---
+# 默认层：只读到底
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeboard-reader
+rules:
+  - apiGroups: [""]
+    resources:
+      - nodes
+      - namespaces
+      - pods
+      - pods/log
+      - services
+      - endpoints
+      - configmaps
+      - secrets
+      - events
+      - persistentvolumes
+      - persistentvolumeclaims
+      - serviceaccounts
+      - resourcequotas
+      - limitranges
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["nodes", "pods"]
+    verbs: ["get", "list"]
+  # 仅为字体/存储类等只读展示所需的 discovery
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch"]
+---
+# 运维层：写操作，但不含 exec / 不含 RBAC 与 CRD 写
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeboard-operator
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "configmaps", "secrets", "namespaces", "persistentvolumeclaims", "serviceaccounts"]
+    verbs: ["create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["create", "update", "patch", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["create", "update", "patch", "delete"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["create", "update", "patch", "delete"]
+---
+# 终端层：仅 exec（默认不绑定，需 --enable-exec）
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeboard-exec
+rules:
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create", "get"]
+---
+# ---- 绑定示例（按需启用） ----
+# 1) 只读（默认）：
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubeboard-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kubeboard-reader
+subjects:
+  - kind: ServiceAccount
+    name: kubeboard
+    namespace: kubeboard
+---
+# 2) 运维（想开放写操作时取消注释）
+#apiVersion: rbac.authorization.k8s.io/v1
+#kind: ClusterRoleBinding
+#metadata:
+#  name: kubeboard-operator
+#roleRef:
+#  apiGroup: rbac.authorization.k8s.io
+#  kind: ClusterRole
+#  name: kubeboard-operator
+#subjects:
+#  - kind: ServiceAccount
+#    name: kubeboard
+#    namespace: kubeboard
+---
+# 3) 终端（配合 --enable-exec，取消注释后生效）
+#apiVersion: rbac.authorization.k8s.io/v1
+#kind: ClusterRoleBinding
+#metadata:
+#  name: kubeboard-exec
+#roleRef:
+#  apiGroup: rbac.authorization.k8s.io
+#  kind: ClusterRole
+#  name: kubeboard-exec
+#subjects:
+#  - kind: ServiceAccount
+#    name: kubeboard
+#    namespace: kubeboard
