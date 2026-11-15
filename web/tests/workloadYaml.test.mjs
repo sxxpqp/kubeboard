@@ -154,7 +154,7 @@ spec:
   eq('镜像 a', f.containers[0].image, 'app-a:1')
   eq('镜像 b', f.containers[1].image, 'app-b:2')
   eq('command', f.containers[0].command, '/bin/sh -c')
-  eq('args', f.containers[0].args, 'echo hi')
+  eq('args', f.containers[0].args, "'echo hi'")
   eq('cpuReq', f.containers[0].cpuReq, '100m')
   eq('memLim', f.containers[0].memLim, '256Mi')
   eq('liveness 启用', f.containers[0].probes.liveness.enabled, true)

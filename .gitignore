@@ -1,5 +1,6 @@
 # 编译产物
 /kubeboard
+/bin/
 /dist/
 *.exe
 
@@ -24,5 +25,9 @@ coverage.txt
 *.local.yaml
 
 # Go 构建临时目录
+/tmp/
 cmd/**/tmp/
 **/runner-build
+
+# 本地开发热重载配置
+runner.conf

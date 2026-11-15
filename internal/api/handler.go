@@ -63,6 +63,7 @@ func (h *Handler) Register(r *gin.Engine) {
 		api.POST("/workloads/restart", h.rolloutRestart)
 		api.POST("/workloads/pause", h.pauseWorkload)
 		api.GET("/workloads/pods", h.workloadPods)
+		api.GET("/workloads/containers", h.workloadContainers)
 		api.GET("/workloads/revisions", h.workloadRevisions)
 		api.GET("/workloads/rollout", h.workloadRolloutStatus)
 		api.POST("/workloads/rollback", h.rolloutUndo)
@@ -126,7 +127,8 @@ func (h *Handler) version(c *gin.Context) {
 		"version":    h.k8s.Version,
 		"metrics":    h.k8s.Metrics != nil,
 		"exec":       h.enableExec,
-		"consoleVer": "v3.2.0",
+		"consoleVer": ConsoleVer,
+		"apiVersion": APIVersion,
 	})
 }
 

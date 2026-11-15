@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node tests/workloadYaml.test.mjs && node tests/simpleYaml.test.mjs && node tests/extraYaml.test.mjs"
+    "test": "node tests/workloadYaml.test.mjs && node tests/simpleYaml.test.mjs && node tests/extraYaml.test.mjs && node tests/projectScope.test.mjs && node tests/resourceContent.test.mjs && node tests/workloadActions.test.mjs && node tests/workloadModel.test.mjs && node tests/workloadFieldsRender.test.mjs && node tests/podTimeline.test.mjs"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.0",

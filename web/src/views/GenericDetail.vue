@@ -1,67 +1,8 @@
 <template>
   <ResourceDetailPage :extra-tabs="extraTabs">
+    <template #actions><el-button v-if="kind==='pod'" @click="consoleVisible=true">日志 / 终端</el-button></template>
+    <template #tab-lifecycle><PodLifecycle :namespace="namespace" :name="resourceName" /></template>
     <template #overview-extra="{ detail }">
-      <!-- ========== Pod 专属：容器 / 卷 / 调度 ========== -->
-      <template v-if="kind === 'pod' && detail.spec">
-        <div class="rd-card" style="margin-top:16px">
-          <div class="rd-card-title">容器（{{ (detail.spec.containers || []).length }}）</div>
-          <el-table :data="detail.spec.containers || []" size="small">
-            <el-table-column prop="name" label="名称" width="140" />
-            <el-table-column prop="image" label="镜像" min-width="240" />
-            <el-table-column prop="imagePullPolicy" label="拉取策略" width="120" />
-            <el-table-column label="命令" min-width="200">
-              <template #default="{ row }"><span class="mono-sm">{{ [...(row.command||[]), ...(row.args||[])].join(' ') || '-' }}</span></template>
-            </el-table-column>
-            <el-table-column label="资源" width="200">
-              <template #default="{ row }">
-                <div class="res-line">CPU: {{ row.resources?.requests?.cpu || '-' }} / {{ row.resources?.limits?.cpu || '-' }}</div>
-                <div class="res-line">MEM: {{ row.resources?.requests?.memory || '-' }} / {{ row.resources?.limits?.memory || '-' }}</div>
-              </template>
-            </el-table-column>
-          </el-table>
-        </div>
-
-        <div class="rd-card" style="margin-top:16px" v-if="(detail.spec.volumes || []).length">
-          <div class="rd-card-title">卷（{{ detail.spec.volumes.length }}）</div>
-          <el-table :data="detail.spec.volumes" size="small">
-            <el-table-column prop="name" label="卷名" width="180" />
-            <el-table-column label="类型" width="140">
-              <template #default="{ row }">
-                <el-tag size="small" type="info">{{ volType(row) }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="来源" min-width="240">
-              <template #default="{ row }"><span class="mono-sm">{{ volSource(row) }}</span></template>
-            </el-table-column>
-          </el-table>
-        </div>
-
-        <div class="rd-card" style="margin-top:16px">
-          <div class="rd-card-title">调度信息</div>
-          <el-descriptions :column="2" border size="small">
-            <el-descriptions-item label="所在节点">
-              <el-link v-if="detail.spec.nodeName" type="primary" @click="gotoKind('node', detail.spec.nodeName, '')">{{ detail.spec.nodeName }}</el-link>
-              <span v-else class="muted">未调度</span>
-            </el-descriptions-item>
-            <el-descriptions-item label="调度器">{{ detail.spec.schedulerName || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="服务账号">{{ detail.spec.serviceAccount || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="重启策略">{{ detail.spec.restartPolicy || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="QoS 等级">
-              <el-tag size="small" :type="detail.status?.qosClass === 'Guaranteed' ? 'success' : (detail.status?.qosClass === 'Burstable' ? 'warning' : 'info')">
-                {{ detail.status?.qosClass || '-' }}
-              </el-tag>
-            </el-descriptions-item>
-            <el-descriptions-item label="Pod IP"><span class="mono-sm">{{ detail.status?.podIP || '-' }}</span></el-descriptions-item>
-            <el-descriptions-item label="节点选择" :span="2">
-              <span v-if="Object.keys(detail.spec.nodeSelector || {}).length">
-                <el-tag v-for="(v,k) in detail.spec.nodeSelector" :key="k" size="small" style="margin:0 4px 2px 0">{{ k }}={{ v }}</el-tag>
-              </span>
-              <span v-else class="muted">无</span>
-            </el-descriptions-item>
-          </el-descriptions>
-        </div>
-      </template>
-
       <!-- 节点专属 -->
       <div v-if="kind === 'node' && detail.status" class="rd-card" style="margin-top:16px">
         <div class="rd-card-title">容量 / 可分配</div>
@@ -74,7 +15,7 @@
         <el-table :data="detail.status.conditions || []" size="small">
           <el-table-column prop="type" label="类型" width="180" />
           <el-table-column label="状态" width="90">
-            <template #default="{ row }"><el-tag :type="row.status === 'True' ? 'success' : 'warning'" size="small">{{ row.status }}</el-tag></template>
+            <template #default="{ row }"><el-tag :type="conditionType(row)" size="small">{{ row.status }}</el-tag></template>
           </el-table-column>
           <el-table-column prop="reason" label="原因" width="160" />
           <el-table-column prop="message" label="消息" min-width="220" />
@@ -139,7 +80,7 @@
           </el-tag>
           <el-button link type="primary" size="small" style="margin-left:8px" @click="loadEndpoints">刷新</el-button>
         </div>
-        <div v-loading="loadingEndpoints">
+        <div v-loading="loadingEndpoints"><el-alert v-if="endpointsError" :title="endpointsError" type="error" :closable="false" />
           <el-alert v-if="endpoints && !endpoints.readyCount && !endpoints.notReadyCount" type="warning" :closable="false"
             title="无后端地址：可能选择器不匹配任何 Pod" />
           <el-table v-if="endpoints && (endpoints.readyCount || endpoints.notReadyCount)" :data="endpointRows" size="small">
@@ -163,17 +104,6 @@
         </div>
       </div>
 
-      <!-- ConfigMap/Secret 专属 -->
-      <div v-if="(kind === 'configmap' || kind === 'secret') && detail.spec" class="rd-card" style="margin-top:16px">
-        <div class="rd-card-title">数据键（{{ (detail.spec.keys || []).length }}）</div>
-        <el-table :data="dataRows(detail)" size="small">
-          <el-table-column prop="key" label="键" width="220" />
-          <el-table-column prop="value" label="值" min-width="300">
-            <template #default="{ row }"><span class="mono-sm">{{ row.value }}</span></template>
-          </el-table-column>
-        </el-table>
-      </div>
-
       <!-- Ingress 专属 -->
       <div v-if="kind === 'ingress' && detail.spec" class="rd-card" style="margin-top:16px">
         <div class="rd-card-title">路由规则</div>
@@ -191,27 +121,7 @@
         </el-descriptions>
       </div>
 
-      <!-- 存储专属 -->
-      <div v-if="(kind === 'pvc' || kind === 'pv') && detail.spec" class="rd-card" style="margin-top:16px">
-        <div class="rd-card-title">存储</div>
-        <el-descriptions :column="2" border size="small">
-          <el-descriptions-item label="访问模式">{{ (detail.spec.accessModes || []).join(', ') }}</el-descriptions-item>
-          <el-descriptions-item label="存储类">{{ detail.spec.storageClass || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="绑定卷">{{ detail.spec.volumeName || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="容量">{{ detail.spec.capacity || '-' }}</el-descriptions-item>
-        </el-descriptions>
-
-        <div class="rd-card-title" style="margin-top:16px">绑定与使用</div>
-        <el-descriptions :column="2" border size="small">
-          <el-descriptions-item label="绑定状态">
-            <el-tag size="small" :type="detail.status?.phase === 'Bound' ? 'success' : 'warning'">{{ detail.status?.phase || '-' }}</el-tag>
-          </el-descriptions-item>
-          <el-descriptions-item label="实际容量">{{ fmtCapacity(detail.status?.capacity) }}</el-descriptions-item>
-          <el-descriptions-item label="绑定卷" :span="2">
-            <el-link v-if="detail.spec.volumeName" type="primary" @click="gotoKind('pv', detail.spec.volumeName, '')">{{ detail.spec.volumeName }}</el-link>
-            <span v-else class="muted">未绑定</span>
-          </el-descriptions-item>
-        </el-descriptions>
+      <div v-if="kind === 'pvc'" class="rd-card" style="margin-top:16px">
         <div class="rd-card-title" style="margin-top:16px">正在使用该 PVC 的 Pod</div>
         <el-table v-if="(detail.usedByPods || []).length" :data="detail.usedByPods" size="small">
           <el-table-column prop="namespace" label="项目" width="140" />
@@ -225,6 +135,7 @@
       </div>
     </template>
   </ResourceDetailPage>
+  <WorkloadConsole v-if="kind==='pod'" v-model="consoleVisible" kind="pod" :namespace="namespace" :name="resourceName" />
 </template>
 
 <script setup>
@@ -232,22 +143,28 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import http from '../api/http'
 import ResourceDetailPage from '../components/ResourceDetailPage.vue'
+import PodLifecycle from '../components/PodLifecycle.vue'
+import WorkloadConsole from '../components/WorkloadConsole.vue'
+import { conditionType } from '../utils/resourceContent'
 
+const consoleVisible = ref(false)
 const route = useRoute()
 const router = useRouter()
 const kind = computed(() => (route.params.kind || '').toLowerCase())
-const namespace = computed(() => route.params.namespace || '')
+const namespace = computed(() => (route.params.namespace === '_' ? '' : route.params.namespace) || '')
 const resourceName = computed(() => route.params.name || '')
 
 const endpoints = ref(null)
 const loadingEndpoints = ref(false)
+const endpointsError = ref('')
 
 async function loadEndpoints() {
   if (kind.value !== 'service') return
   loadingEndpoints.value = true
+  endpointsError.value = ''
   try {
     endpoints.value = await http.get('/service-endpoints', { params: { namespace: namespace.value, name: resourceName.value } })
-  } catch { endpoints.value = null } finally { loadingEndpoints.value = false }
+  } catch (e) { endpoints.value = null; endpointsError.value = e.response?.data?.error || e.message } finally { loadingEndpoints.value = false }
 }
 
 const endpointRows = computed(() => {
@@ -267,30 +184,8 @@ function gotoKind(k, name, ns) {
   if (!k) return
   const wk = ['deployment', 'statefulset', 'daemonset']
   if (wk.includes(k)) router.push(`/workloads/${k}/${ns}/${name}`)
-  else router.push(`/detail/${k}/${ns}/${name}`)
+  else router.push(`/detail/${k}/${ns || '_'}/${encodeURIComponent(name)}`)
 }
-function volType(v) {
-  if (v.configMap) return 'ConfigMap'
-  if (v.secret) return 'Secret'
-  if (v.pvc) return 'PVC'
-  if (v.hostPath) return 'HostPath'
-  if (v.emptyDir) return 'EmptyDir'
-  return '其他'
-}
-function volSource(v) {
-  if (v.configMap) return v.configMap
-  if (v.secret) return v.secret
-  if (v.pvc) return v.pvc
-  if (v.hostPath) return v.hostPath
-  if (v.emptyDir) return '临时目录'
-  return '-'
-}
-function fmtCapacity(cap) {
-  if (!cap) return '-'
-  if (typeof cap === 'string') return cap
-  return cap.storage || JSON.stringify(cap)
-}
-
 onMounted(loadEndpoints)
 
 const extraTabs = computed(() => {
@@ -303,10 +198,6 @@ function nodeResources(detail) {
   const alloc = detail.status?.allocatable || {}
   const keys = new Set([...Object.keys(cap), ...Object.keys(alloc)])
   return [...keys].map((k) => ({ key: k, capacity: cap[k] || '-', allocatable: alloc[k] || '-' }))
-}
-function dataRows(detail) {
-  const data = detail.spec?.data || {}
-  return Object.keys(data).map((k) => ({ key: k, value: data[k] }))
 }
 </script>
 

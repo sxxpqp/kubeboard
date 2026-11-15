@@ -1,34 +1,69 @@
 <template>
-  <div v-loading="loading" class="rd-page">
+  <div v-loading="loading" class="rd-page" :class="{ 'rd-wide': wide }">
+    <aside class="rd-summary"><div class="summary-icon">{{ kindLabel.slice(0, 1) }}</div><span class="muted">{{ kindLabel }}</span><h1>{{ rName }}</h1><el-tag v-if="stateTag" :type="stateTagType">{{ stateTag }}</el-tag><dl><dt>项目</dt><dd>{{ rNs || '集群资源' }}</dd><dt>创建时间</dt><dd>{{ fmtTime(meta.creationTime) }}</dd><dt>存活时长</dt><dd>{{ age }}</dd><template v-for="attribute in summaryAttributes" :key="attribute.label"><dt>{{ attribute.label }}</dt><dd>{{ attribute.value }}</dd></template></dl><p class="muted">通过右侧页签查看资源状态、关联资源及事件。</p></aside>
     <!-- 头部 -->
     <div class="rd-header">
       <el-button :icon="'Back'" @click="$router.back()">返回</el-button>
       <div class="rd-title">
         <span class="rd-kind">{{ kindLabel }}</span>
-        <span class="rd-name">{{ name }}</span>
+        <span class="rd-name">{{ rName }}</span>
         <el-tag v-if="stateTag" :type="stateTagType" size="small" effect="dark">{{ stateTag }}</el-tag>
       </div>
-      <div class="rd-ns" v-if="namespace">
+      <div class="rd-ns" v-if="rNs">
         <span class="muted">项目</span>
-        <el-link type="primary" @click="$router.push('/namespaces/' + namespace)">{{ namespace }}</el-link>
+        <el-link type="primary" @click="$router.push('/namespaces/' + rNs)">{{ rNs }}</el-link>
       </div>
       <div style="flex: 1"></div>
       <slot name="actions" :detail="detail" />
+      <el-button v-if="!$slots['operation-bar']" @click="openEdit(rName, rNs)">编辑 YAML</el-button>
+      <el-button v-if="!$slots['operation-bar']" type="danger" plain @click="remove(rName, rNs)">删除</el-button>
       <el-button :icon="'Refresh'" @click="load" />
     </div>
 
+    <div v-if="$slots['operation-bar']" class="rd-operation-bar"><slot name="operation-bar" :detail="detail" :reload="load" /></div>
     <el-alert v-if="error" type="error" :closable="false" :title="error" style="margin-bottom: 16px" />
 
+    <YamlDialog v-model="dialogVisible" :mode="dialogMode" :kind="rKind" :namespace="currentNamespace" :name="currentName" @saved="load" />
     <el-tabs v-model="activeTab" class="rd-tabs">
+      <el-tab-pane v-for="t in extraTabs.filter(t => t.name === 'runtime')" :key="t.name" :label="t.label" :name="t.name"><slot :name="`tab-${t.name}`" :detail="detail" /></el-tab-pane>
       <!-- 概览 -->
-      <el-tab-pane label="概览" name="overview">
+      <el-tab-pane label="资源状态" name="overview">
+        <ResourceContent :detail="detail" />
+        <!-- 类型专属摘要 -->
+        <slot name="overview-extra" :detail="detail" />
+
+        <!-- 状态状况（conditions）：协调状态一览，含代数偏差告警 -->
+        <div v-if="conditions.length" class="rd-card" style="margin-bottom: 16px">
+          <div class="rd-card-title">
+            状态状况
+            <el-tag v-if="staleGeneration" type="danger" size="small" style="margin-left: 8px">
+              代数偏差：已观测 {{ detail.status?.observation?.observedGeneration }} / 期望 {{ detail.status?.observation?.generation }}
+            </el-tag>
+          </div>
+          <el-table :data="conditions" size="small">
+            <el-table-column prop="type" label="类型" width="180" />
+            <el-table-column label="状态" width="90">
+              <template #default="{ row }">
+                <el-tag :type="conditionType(row)" size="small">{{ row.status }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="reason" label="原因" width="180" />
+            <el-table-column prop="message" label="消息" min-width="240" />
+            <el-table-column label="最近更新" width="160">
+              <template #default="{ row }">{{ fmtTime(row.lastUpdate || row.lastTransitionTime) }}</template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane label="元数据" name="metadata">
         <div class="rd-grid">
           <div class="rd-card">
             <div class="rd-card-title">基本信息</div>
             <el-descriptions :column="2" border size="small">
-              <el-descriptions-item label="名称">{{ name }}</el-descriptions-item>
+              <el-descriptions-item label="名称">{{ rName }}</el-descriptions-item>
               <el-descriptions-item label="类型">{{ kindLabel }}</el-descriptions-item>
-              <el-descriptions-item label="项目">{{ namespace || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="项目">{{ rNs || '-' }}</el-descriptions-item>
               <el-descriptions-item label="创建时间">{{ fmtTime(meta.creationTime) }}</el-descriptions-item>
               <el-descriptions-item label="UID">
                 <span class="mono">{{ meta.uid || '-' }}</span>
@@ -51,8 +86,11 @@
             </div>
             <div class="label-section">
               <div class="sub-title">Annotations</div>
-              <div v-if="Object.keys(meta.annotations || {}).length">
-                <el-tag v-for="(v, k) in meta.annotations" :key="k" type="info" size="small" class="anno-tag">{{ k }}</el-tag>
+              <div v-if="Object.keys(meta.annotations || {}).length" class="anno-list">
+                <div v-for="(v, k) in meta.annotations" :key="k" class="anno-row">
+                  <span class="anno-key">{{ k }}</span>
+                  <span class="anno-val">{{ v }}</span>
+                </div>
               </div>
               <span v-else class="muted">无</span>
             </div>
@@ -66,14 +104,11 @@
           </div>
         </div>
 
-        <!-- 类型专属摘要 -->
-        <slot name="overview-extra" :detail="detail" />
       </el-tab-pane>
-
       <!-- 关联资源 -->
       <el-tab-pane label="关联资源" name="related">
-        <div v-loading="loadingRelated">
-          <el-alert v-if="!loadingRelated && !relatedGroups.length" type="info" :closable="false" title="未发现关联资源" />
+        <div v-loading="loadingRelated"><el-alert v-if="relatedError" :title="relatedError" type="error" :closable="false"><el-button link @click="loadRelated">重试</el-button></el-alert>
+          <el-alert v-if="!loadingRelated && !relatedError && !relatedGroups.length" type="info" :closable="false" title="未发现关联资源" />
           <div v-for="g in relatedGroups" :key="g.kind" class="rel-group">
             <div class="rel-title">{{ g.label }} <span class="muted">({{ g.items.length }})</span></div>
             <div class="rel-list">
@@ -91,6 +126,7 @@
       <!-- 事件（按 uid 精确绑定 + 可选聚合关联资源）-->
       <el-tab-pane name="events">
         <template #label>事件 <el-badge v-if="events.length" :value="events.length" type="primary" /></template>
+        <el-alert v-if="eventsError" :title="eventsError" type="error" :closable="false"><el-button link @click="loadEvents">重试</el-button></el-alert>
         <div class="ev-bar">
           <el-switch v-model="includeRelated" size="small" active-text="包含关联资源事件" @change="loadEvents" />
           <span class="muted">共 {{ events.length }} 条</span>
@@ -116,10 +152,16 @@
       </el-tab-pane>
 
       <!-- 扩展 Tab -->
-      <el-tab-pane v-for="t in extraTabs" :key="t.name" :label="t.label" :name="t.name">
+      <el-tab-pane v-for="t in extraTabs.filter(t => t.name !== 'runtime')" :key="t.name" :label="t.label" :name="t.name">
         <slot :name="`tab-${t.name}`" :detail="detail" />
       </el-tab-pane>
 
+      <el-tab-pane v-if="envContainers.length" label="环境变量" name="environment">
+        <section v-for="ctr in envContainers" :key="ctr.name" class="rd-card" style="margin-bottom: 16px">
+          <div class="rd-card-title">{{ ctr.name }}</div>
+          <el-table :data="ctr.rows" empty-text="未配置环境变量"><el-table-column prop="name" label="变量名" min-width="180" /><el-table-column prop="value" label="值 / 引用（Secret 仅展示引用）" min-width="260" /></el-table>
+        </section>
+      </el-tab-pane>
       <!-- YAML -->
       <el-tab-pane label="YAML" name="yaml">
         <pre class="yaml-box">{{ detail.rawYaml || '加载中…' }}</pre>
@@ -131,11 +173,16 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import http from '../api/http'
+import ResourceContent from './ResourceContent.vue'
+import YamlDialog from './YamlDialog.vue'
+import { useResourceCRUD } from '../api/crud'
+import { resourceObject, environmentContainers, conditionType } from '../utils/resourceContent'
 
 const props = defineProps({
   // 若传 kind 则用 prop，否则从路由参数取
+  wide: Boolean,
+  defaultTab: { type: String, default: 'overview' },
   kind: { type: String, default: '' },
   name: { type: String, default: '' },
   namespace: { type: String, default: '' },
@@ -148,33 +195,57 @@ const router = useRouter()
 
 const rKind = computed(() => props.kind || route.params.kind || route.meta.kind || '')
 const rName = computed(() => props.name || route.params.name || '')
-const rNs = computed(() => props.namespace || route.params.namespace || '')
+const rNs = computed(() => props.namespace || (route.params.namespace === '_' ? '' : route.params.namespace) || '')
 
 const detail = ref({})
 const loading = ref(false)
 const error = ref('')
-const activeTab = ref('overview')
+const initialTabs = ['overview', 'related', 'metadata', 'events', 'environment', 'yaml', ...props.extraTabs.map(tab => tab.name)]
+const activeTab = ref(initialTabs.includes(route.query.tab) ? route.query.tab : props.defaultTab)
 
+const { dialogVisible, dialogMode, currentNamespace, currentName, openEdit, remove } = useResourceCRUD(rKind, () => router.back())
+const envContainers = computed(() => environmentContainers(resourceObject(detail.value)))
 const relatedItems = ref([])
 const loadingRelated = ref(false)
+const relatedError = ref('')
+const eventsError = ref('')
 const events = ref([])
 const loadingEvents = ref(false)
 const includeRelated = ref(false)
 
 const meta = computed(() => detail.value.metadata || {})
-const kindLabel = computed(() => props.kindLabel || detail.value.kind || rKind.value)
+const conditions = computed(() => detail.value.status?.conditions || resourceObject(detail.value).status?.conditions || [])
+// 代数偏差：spec.generation > status.observedGeneration 说明控制器还没处理完最新变更
+const staleGeneration = computed(() => {
+  const o = detail.value.status?.observation
+  return o && o.generation > o.observedGeneration
+})
+const kindLabel = computed(() => props.kindLabel || KIND_LABELS[rKind.value] || detail.value.kind || rKind.value)
 
 const KIND_LABELS = {
   pod: '容器组', node: '节点', service: '服务', ingress: '应用路由',
   replicaset: '副本集', pvc: '持久卷声明', pv: '持久卷', deployment: '部署',
   statefulset: '有状态副本集', daemonset: '守护进程集', configmap: '配置字典',
-  secret: '***', job: '任务', cronjob: '定时任务', serviceaccount: '服务账号',
+  secret: '保密字典', job: '任务', cronjob: '定时任务', serviceaccount: '服务账号',
   storageclass: '存储类', networkpolicy: '网络策略', hpa: '弹性伸缩',
 }
 const KIND_COLORS = {
   pod: 'primary', node: 'success', service: 'warning', ingress: 'danger',
-  replicaset: 'info', pvc: 'info', pv: 'info', configmap: 'info', secret: '***',
+  replicaset: 'info', pvc: 'info', pv: 'info', configmap: 'info', secret: 'danger',
 }
+
+const summaryAttributes = computed(() => {
+  const spec = detail.value.spec || {}
+  const fields = {
+    pvc: [['存储类', 'storageClass'], ['访问模式', 'accessModes'], ['绑定卷', 'volumeName']],
+    pv: [['存储类', 'storageClass'], ['访问模式', 'accessModes']],
+    pod: [['所在节点', 'nodeName'], ['服务账号', 'serviceAccount'], ['重启策略', 'restartPolicy']],
+    service: [['服务类型', 'type'], ['集群 IP', 'clusterIP']],
+    deployment: [['更新策略', 'strategy'], ['期望副本', 'replicas']],
+    statefulset: [['期望副本', 'replicas']],
+  }[rKind.value] || []
+  return fields.map(([label, key]) => ({ label, value: Array.isArray(spec[key]) ? spec[key].join(', ') : spec[key] ?? '—' }))
+})
 
 const stateTag = computed(() => {
   const s = detail.value.status || {}
@@ -209,29 +280,18 @@ const relatedGroups = computed(() => {
 })
 
 function fmtTime(ts) {
-  return ts ? new Date(ts * 1000).toLocaleString('zh-CN', { hour12: false }) : '-'
+  return ts ? new Date(typeof ts === 'number' ? ts * 1000 : ts).toLocaleString('zh-CN', { hour12: false }) : '-'
 }
 
-function gotoOwner(o) {
-  const k = (o.kind || '').toLowerCase()
-  const routes = { pod: '/pods', deployment: '/workloads', replicaset: '/workloads', statefulset: '/workloads', daemonset: '/workloads', job: '/jobs', cronjob: '/cronjobs' }
-  const path = routes[k]
-  if (!path) return ElMessage.info(`暂不支持跳转到 ${o.kind}`)
-  router.push({ path, query: { namespace: rNs.value, name: o.name } })
+function gotoObject(kind, name, ns) {
+  const k = String(kind || '').toLowerCase()
+  const path = ['deployment', 'statefulset', 'daemonset'].includes(k)
+    ? `/workloads/${k}/${encodeURIComponent(ns || '_')}/${encodeURIComponent(name)}`
+    : `/detail/${k}/${encodeURIComponent(ns || '_')}/${encodeURIComponent(name)}`
+  router.push(path)
 }
-
-function gotoRelated(it) {
-  const routes = {
-    pod: '/pods', service: '/services', ingress: '/ingresses', node: '/nodes',
-    pvc: '/pvcs', pv: '/pvs', configmap: '/configmaps', secret: '***',
-    replicaset: '/workloads',
-  }
-  const path = routes[it.kind]
-  if (!path) return ElMessage.info(`暂不支持跳转到 ${it.kind}`)
-  const query = {}
-  if (it.namespace) query.namespace = it.namespace
-  router.push({ path, query })
-}
+function gotoOwner(owner) { gotoObject(owner.kind, owner.name, rNs.value) }
+function gotoRelated(item) { gotoObject(item.kind, item.name, item.namespace) }
 
 async function load() {
   loading.value = true
@@ -250,20 +310,22 @@ async function load() {
 }
 
 async function loadRelated() {
+  relatedError.value = ''
   loadingRelated.value = true
   try {
     const params = { kind: rKind.value, name: rName.value }
     if (rNs.value) params.namespace = rNs.value
     const d = await http.get('/related', { params })
     relatedItems.value = d.items || []
-  } catch {
-    relatedItems.value = []
+  } catch (e) {
+    relatedError.value = '关联资源加载失败：' + (e?.message || '请重试')
   } finally {
     loadingRelated.value = false
   }
 }
 
 async function loadEvents() {
+  eventsError.value = ''
   loadingEvents.value = true
   try {
     const params = { kind: rKind.value, name: rName.value }
@@ -271,8 +333,8 @@ async function loadEvents() {
     params.includeRelated = includeRelated.value ? '1' : '0'
     const d = await http.get('/events/for', { params })
     events.value = d.items || []
-  } catch {
-    events.value = []
+  } catch (e) {
+    eventsError.value = '事件加载失败：' + (e?.message || '请重试')
   } finally {
     loadingEvents.value = false
   }
@@ -283,18 +345,32 @@ defineExpose({ load })
 </script>
 
 <style scoped>
-.rd-page { padding: 0; }
-.rd-header { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+.rd-operation-bar { grid-column: 2; padding: 16px; background: var(--ks-card-bg, #fff); border: 1px solid var(--ks-border); border-radius: 6px; }
+.rd-page { padding: 0; display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 20px; align-items: start; }
+.rd-summary { grid-row: 1 / span 4; padding: 24px; background: white; border: 1px solid var(--ks-border); border-radius: 8px; position: sticky; top: 0; overflow-wrap: anywhere; }
+.summary-icon { width: 48px; height: 48px; background: #eaf6ef; color: #23865b; border-radius: 12px; display: grid; place-items: center; font-size: 22px; margin-bottom: 20px; }
+.rd-summary h1 { font-size: 22px; margin: 10px 0 16px; }
+.rd-summary dl { border-top: 1px solid var(--ks-border); margin-top: 24px; padding-top: 8px; }
+.rd-summary dt { font-size: 12px; color: var(--ks-text-secondary); margin-top: 18px; }
+.rd-summary dd { margin: 6px 0; font-size: 13px; }
+.rd-tabs { min-width: 0; grid-column: 2; }
+@media(max-width: 1100px) { .rd-page { grid-template-columns: 1fr; } .rd-summary { grid-row: auto; position: static; } .rd-summary dl, .rd-summary p { display: none; } .rd-header, .rd-tabs { grid-column: 1; } }
+.rd-page > .el-alert { grid-column: 2; }
+.rd-header { grid-column: 2; display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
 .rd-title { display: flex; align-items: center; gap: 10px; }
 .rd-kind { color: var(--ks-text-secondary); font-size: 14px; }
 .rd-name { font-size: 18px; font-weight: 600; }
 .rd-ns { display: flex; align-items: center; gap: 6px; font-size: 13px; }
 .rd-tabs { background: var(--ks-card-bg, #fff); border-radius: 8px; padding: 16px; }
 .rd-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
-@media (max-width: 1100px) { .rd-grid { grid-template-columns: 1fr; } }
+@media (max-width: 1100px) { .rd-grid { grid-template-columns: 1fr; } .rd-header, .rd-tabs, .rd-page > .el-alert, .rd-operation-bar { grid-column: 1; } }
 .rd-card { background: var(--ks-bg-light, #f9fbfd); border-radius: 8px; padding: 16px; }
 .rd-card-title { font-weight: 600; font-size: 14px; margin-bottom: 12px; }
 .label-section { margin-bottom: 14px; }
+.anno-list { max-height: 220px; overflow-y: auto; }
+.anno-row { display: flex; gap: 8px; font-size: 12px; padding: 3px 0; border-bottom: 1px dashed var(--el-border-color-lighter, #eee); }
+.anno-key { color: var(--ks-primary); flex-shrink: 0; word-break: break-all; }
+.anno-val { color: var(--ks-text-secondary); word-break: break-all; }
 .sub-title { font-size: 12px; color: var(--ks-text-secondary); margin-bottom: 6px; }
 .mono { font-family: monospace; font-size: 12px; }
 .mono-sm { font-family: monospace; font-size: 12px; }
@@ -317,4 +393,7 @@ defineExpose({ load })
   font-size: 12px; line-height: 1.6; padding: 14px; border-radius: 6px;
   max-height: 620px; overflow: auto; margin: 0; white-space: pre-wrap; word-break: break-all;
 }
+.rd-page.rd-wide { grid-template-columns: minmax(0, 1fr); }
+.rd-wide > .rd-summary { display: none; }
+.rd-wide > .rd-header, .rd-wide > .rd-tabs, .rd-wide > .rd-operation-bar, .rd-wide > .el-alert { grid-column: 1; }
 </style>

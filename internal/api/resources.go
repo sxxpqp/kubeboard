@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -51,6 +52,57 @@ func (h *Handler) listNamespaces(c *gin.Context) {
 	c.JSON(200, gin.H{"items": items, "total": len(items)})
 }
 
+
+// workloadState 按 KubeSphere 语义归约工作负载状态：
+// 运行中（ready==desired 且 desired>0）/ 已停止（desired==0 且 replicas==0）/ 更新中（其余）。
+func workloadState(ready, desired, actual int32) string {
+	if desired == 0 && actual == 0 {
+		return "stopped"
+	}
+	if ready == desired {
+		return "running"
+	}
+	return "updating"
+}
+
+// maxUnix 取时间戳最大值（0 优先级最低），用于 conditions 最近更新时间。
+func maxUnix(ts ...int64) int64 {
+	var latest int64
+	for _, t := range ts {
+		if t > latest {
+			latest = t
+		}
+	}
+	return latest
+}
+
+// workloadUpdatedAtDep（deployment）取 conditions 最近更新时间。
+func workloadUpdatedAtDep(conds []appsv1.DeploymentCondition) int64 {
+	times := make([]int64, 0, len(conds))
+	for _, c := range conds {
+		times = append(times, c.LastUpdateTime.Unix())
+	}
+	return maxUnix(times...)
+}
+
+// workloadUpdatedAtSts（statefulset）取 conditions 最近更新时间。
+func workloadUpdatedAtSts(conds []appsv1.StatefulSetCondition) int64 {
+	times := make([]int64, 0, len(conds))
+	for _, c := range conds {
+		times = append(times, c.LastTransitionTime.Unix())
+	}
+	return maxUnix(times...)
+}
+
+// workloadUpdatedAtDs（daemonset）取 conditions 最近更新时间。
+func workloadUpdatedAtDs(conds []appsv1.DaemonSetCondition) int64 {
+	times := make([]int64, 0, len(conds))
+	for _, c := range conds {
+		times = append(times, c.LastTransitionTime.Unix())
+	}
+	return maxUnix(times...)
+}
+
 func (h *Handler) listWorkloads(c *gin.Context) {
 	ctx := c.Request.Context()
 	kind := c.DefaultQuery("kind", "deployment")
@@ -69,8 +121,11 @@ func (h *Handler) listWorkloads(c *gin.Context) {
 			for _, d := range l.Items {
 				items = append(items, gin.H{
 					"namespace": d.Namespace, "name": d.Name,
+					"description": d.Annotations["description"],
 					"ready":   fmt.Sprintf("%d/%d", d.Status.ReadyReplicas, *d.Spec.Replicas),
 					"replicas": d.Status.Replicas, "available": d.Status.AvailableReplicas,
+					"state":   workloadState(d.Status.ReadyReplicas, *d.Spec.Replicas, d.Status.Replicas),
+					"updatedAt": workloadUpdatedAtDep(d.Status.Conditions),
 					"images":    containerImages(d.Spec.Template.Spec.Containers),
 					"creationTime": d.CreationTimestamp.Unix(),
 				})
@@ -84,8 +139,11 @@ func (h *Handler) listWorkloads(c *gin.Context) {
 			for _, d := range l.Items {
 				items = append(items, gin.H{
 					"namespace": d.Namespace, "name": d.Name,
+					"description": d.Annotations["description"],
 					"ready":   fmt.Sprintf("%d/%d", d.Status.ReadyReplicas, *d.Spec.Replicas),
 					"replicas": d.Status.Replicas,
+					"state":   workloadState(d.Status.ReadyReplicas, *d.Spec.Replicas, d.Status.Replicas),
+					"updatedAt": workloadUpdatedAtSts(d.Status.Conditions),
 					"images":    containerImages(d.Spec.Template.Spec.Containers),
 					"creationTime": d.CreationTimestamp.Unix(),
 				})
@@ -99,8 +157,11 @@ func (h *Handler) listWorkloads(c *gin.Context) {
 			for _, d := range l.Items {
 				items = append(items, gin.H{
 					"namespace": d.Namespace, "name": d.Name,
+					"description": d.Annotations["description"],
 					"ready":   fmt.Sprintf("%d/%d", d.Status.NumberReady, d.Status.DesiredNumberScheduled),
 					"desired": d.Status.DesiredNumberScheduled,
+					"state":   workloadState(d.Status.NumberReady, d.Status.DesiredNumberScheduled, d.Status.NumberReady),
+					"updatedAt": workloadUpdatedAtDs(d.Status.Conditions),
 					"images":    containerImages(d.Spec.Template.Spec.Containers),
 					"creationTime": d.CreationTimestamp.Unix(),
 				})

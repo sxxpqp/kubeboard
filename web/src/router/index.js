@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { projectPath, projectResources } from './projectScope'
 
 const routes = [
   { path: '/login', component: () => import('../views/Login.vue') },
@@ -12,6 +13,9 @@ const routes = [
       { path: 'nodes', component: () => import('../views/Nodes.vue'), meta: { title: '节点' } },
       { path: 'namespaces', component: () => import('../views/Namespaces.vue'), meta: { title: '项目' } },
       { path: 'namespaces/:namespace', component: () => import('../views/NamespaceDetail.vue'), meta: { title: '项目详情' } },
+      { path: 'workloads/create', component: () => import('../views/WorkloadEditor.vue'), meta: { title: '创建工作负载', editor: true } },
+      { path: 'projects/:namespace/workloads/create', component: () => import('../views/WorkloadEditor.vue'), meta: { title: '创建工作负载', editor: true } },
+      { path: 'workloads/:kind/:namespace/:name/edit', component: () => import('../views/WorkloadEditor.vue'), meta: { title: '编辑工作负载', editor: true } },
       { path: 'workloads/:kind/:namespace/:name', component: () => import('../views/WorkloadDetail.vue'), meta: { title: '工作负载详情' } },
       { path: 'detail/:kind/:namespace/:name', component: () => import('../views/GenericDetail.vue'), meta: { title: '资源详情' } },
       { path: 'events', component: () => import('../views/Events.vue'), meta: { title: '事件' } },
@@ -36,11 +40,22 @@ const routes = [
   },
 ]
 
+// 复用相同页面组件，项目范围由路径参数提供。
+const projectRoutes = routes[1].children.filter(route => projectResources.has(route.path))
+routes[1].children.push(...projectRoutes.map(route => ({ ...route, path: `projects/:namespace/${route.path}` })))
+
 const router = createRouter({ history: createWebHistory(), routes })
 
 router.beforeEach((to) => {
   if (to.path !== '/login' && !localStorage.getItem('kubeboard_token')) {
     return '/login'
+  }
+  if (typeof to.query.namespace === 'string') {
+    const path = projectPath(to.path, to.query.namespace)
+    if (path !== to.path || to.params.namespace) {
+      const { namespace, ...query } = to.query
+      return { path, query, hash: to.hash, replace: true }
+    }
   }
 })
 

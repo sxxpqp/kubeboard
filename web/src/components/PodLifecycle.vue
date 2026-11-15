@@ -11,30 +11,9 @@
     <!-- 时间轴 -->
     <div class="lc-section">
       <div class="lc-title">时间线</div>
-      <el-timeline>
-        <el-timeline-item
-          v-if="detail.creationTime"
-          :timestamp="fmtTime(detail.creationTime)" placement="top" type="primary"
-        >创建 Pod</el-timeline-item>
-        <el-timeline-item
-          v-if="condTime('PodScheduled')"
-          :timestamp="fmtTime(condTime('PodScheduled'))" placement="top"
-        >调度到节点 <b>{{ detail.nodeName }}</b></el-timeline-item>
-        <el-timeline-item
-          v-for="c in detail.containers || []"
-          :key="'c-' + c.name"
-          v-show="c.startedAt"
-          :timestamp="fmtTime(c.startedAt)" placement="top" type="success"
-        >容器 <b>{{ c.name }}</b> 启动</el-timeline-item>
-        <el-timeline-item
-          v-if="condTime('Ready')"
-          :timestamp="fmtTime(condTime('Ready'))" placement="top" type="success"
-        >Pod 就绪（Ready）</el-timeline-item>
-        <el-timeline-item
-          v-if="detail.deletionTime"
-          :timestamp="fmtTime(detail.deletionTime)" placement="top" type="danger"
-        >开始终止（Terminating）</el-timeline-item>
-      </el-timeline>
+      <el-alert v-if="eventError" :title="eventError" type="warning" :closable="false" />
+      <el-timeline><el-timeline-item v-for="(item, i) in timeline" :key="i" :timestamp="fmtTime(item.time)" placement="top" :type="item.type"><strong>{{ item.title }}</strong><p class="muted">{{ item.message }}</p></el-timeline-item></el-timeline>
+      <p class="muted">最新记录在上。事件可能过期，未保留的拉镜像、创建记录不做推断。</p>
     </div>
 
     <!-- 条件链 -->
@@ -90,6 +69,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import http from '../api/http'
+import { podTimeline } from '../utils/podTimeline'
 
 const props = defineProps({
   namespace: { type: String, required: true },
@@ -98,6 +78,9 @@ const props = defineProps({
 
 const detail = ref({})
 const loading = ref(false)
+const events = ref([])
+const eventError = ref('')
+const timeline = computed(() => podTimeline(detail.value, events.value))
 
 const phaseType = computed(() => {
   const p = detail.value.phase
@@ -127,7 +110,9 @@ function condTime(type) {
 async function load() {
   loading.value = true
   try {
-    detail.value = await http.get('/pods/detail', { params: { namespace: props.namespace, name: props.name } })
+    const params = { namespace: props.namespace, name: props.name }
+    detail.value = await http.get('/pods/detail', { params })
+    try { const data = await http.get('/events/for', { params: { ...params, kind: 'pod' } }); events.value = data.items || [] } catch { eventError.value = 'Pod 事件读取失败，以下仅显示可获取的状态记录' }
   } catch (e) {
     ElMessage.error('获取 Pod 生命周期失败: ' + (e?.message || ''))
   } finally {

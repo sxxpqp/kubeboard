@@ -19,14 +19,15 @@ import (
 const revisionAnnotation = "deployment.kubernetes.io/revision"
 
 type revisionInfo struct {
-	Revision  int64  `json:"revision"`
-	Name      string `json:"name"`      // ReplicaSet 名
-	Replicas  int32  `json:"replicas"`  // 期望副本
-	Ready     int32  `json:"ready"`     // 就绪副本
-	Images    []string `json:"images"`
-	Current   bool   `json:"current"`   // 是否当前生效版本
-	CreatedAt int64  `json:"createdTime"`
-	ChangeCause string `json:"changeCause"`
+	Template    *corev1.PodTemplateSpec `json:"template,omitempty"`
+	Revision    int64                   `json:"revision"`
+	Name        string                  `json:"name"`     // ReplicaSet 名
+	Replicas    int32                   `json:"replicas"` // 期望副本
+	Ready       int32                   `json:"ready"`    // 就绪副本
+	Images      []string                `json:"images"`
+	Current     bool                    `json:"current"` // 是否当前生效版本
+	CreatedAt   int64                   `json:"createdTime"`
+	ChangeCause string                  `json:"changeCause"`
 }
 
 // workloadRevisions 返回 Deployment 的版本历史（等价 kubectl rollout history）
@@ -59,6 +60,10 @@ func (h *Handler) workloadRevisions(c *gin.Context) {
 		}
 		revs := make([]revisionInfo, 0, len(rsList.Items))
 		for _, rs := range rsList.Items {
+			owner := metav1.GetControllerOf(&rs)
+			if owner == nil || owner.UID != d.UID || owner.Kind != "Deployment" {
+				continue
+			}
 			rev, _ := strconv.ParseInt(rs.Annotations[revisionAnnotation], 10, 64)
 			if rev == 0 {
 				continue
@@ -70,7 +75,7 @@ func (h *Handler) workloadRevisions(c *gin.Context) {
 			cause := rs.Annotations["kubernetes.io/change-cause"]
 			revs = append(revs, revisionInfo{
 				Revision: rev, Name: rs.Name, Replicas: desired, Ready: rs.Status.ReadyReplicas,
-				Images: containerImages(rs.Spec.Template.Spec.Containers),
+				Images: containerImages(rs.Spec.Template.Spec.Containers), Template: rs.Spec.Template.DeepCopy(),
 				Current: rev == currentRev, CreatedAt: rs.CreationTimestamp.Unix(), ChangeCause: cause,
 			})
 		}
@@ -115,10 +120,16 @@ func (h *Handler) workloadRevisions(c *gin.Context) {
 					}
 				}
 			}
+			var snapshot struct {
+				Spec struct {
+					Template *corev1.PodTemplateSpec `json:"template"`
+				} `json:"spec"`
+			}
+			_ = jsonUnmarshal(cr.Data.Raw, &snapshot)
 			isCurrent := cr.Name == currentRevName
 			revs = append(revs, revisionInfo{
 				Revision: cr.Revision, Name: cr.Name, Replicas: desired,
-				Images: revisionImages(cr.Data.Raw),
+				Images: revisionImages(cr.Data.Raw), Template: snapshot.Spec.Template,
 				Current: isCurrent, CreatedAt: cr.CreationTimestamp.Unix(),
 			})
 			if isCurrent {
@@ -170,6 +181,10 @@ func (h *Handler) rolloutUndo(c *gin.Context) {
 		}
 		var target *appsv1.ReplicaSet
 		for i := range rsList.Items {
+			owner := metav1.GetControllerOf(&rsList.Items[i])
+			if owner == nil || owner.UID != d.UID || owner.Kind != "Deployment" {
+				continue
+			}
 			rev, _ := strconv.ParseInt(rsList.Items[i].Annotations[revisionAnnotation], 10, 64)
 			if rev == req.Revision {
 				target = &rsList.Items[i]

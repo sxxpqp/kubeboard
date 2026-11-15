@@ -1,0 +1,35 @@
+root = "."
+testdata_dir = "testdata"
+tmp_dir = "tmp"
+
+[build]
+  # 必须：包路径明确，避免 fresh 在根目录 no Go files 的老问题
+  cmd = "go build -o ./tmp/kubeboard ./cmd/kubeboard"
+  bin = "./tmp/kubeboard"
+  full_bin = "./tmp/kubeboard"
+  include_ext = ["go", "tpl", "tmpl", "html"]
+  include_dir = ["cmd", "internal", "pkg"]
+  # 关键：排除 web/node_modules（fresh 的 too many open files 教训）
+  exclude_dir = ["assets", "testdata", "tmp", "bin", "web", "vendor", "docs"]
+  exclude_file = []
+  exclude_regex = ["_test.go"]
+  include_regex = []
+  delay = 1000
+  stop_on_error = true
+  send_interrupt = true
+  kill_delay = 3000
+  rerun = false
+  rerun_delay = 500
+
+[log]
+  time = false
+  main_only = false
+
+[color]
+  main = "magenta"
+  watcher = "cyan"
+  build = "yellow"
+  runner = "green"
+
+[misc]
+  clean_on_exit = true

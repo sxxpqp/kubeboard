@@ -76,14 +76,14 @@ func (h *Handler) scaleWorkload(c *gin.Context) {
 		Kind      string `json:"kind" binding:"required"`
 		Namespace string `json:"namespace" binding:"required"`
 		Name      string `json:"name" binding:"required"`
-		Replicas  int32  `json:"replicas"`
+		Replicas  *int32 `json:"replicas" binding:"required,gte=0"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	ctx := c.Request.Context()
-	replicas := req.Replicas
+	replicas := *req.Replicas
 
 	switch req.Kind {
 	case "deployment":

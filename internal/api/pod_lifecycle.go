@@ -26,24 +26,28 @@ func (h *Handler) podDetail(c *gin.Context) {
 	conditions := make([]gin.H, 0, len(p.Status.Conditions))
 	for _, c := range p.Status.Conditions {
 		conditions = append(conditions, gin.H{
-			"type":   string(c.Type),
-			"status": string(c.Status),
-			"reason": c.Reason,
-			"message": c.Message,
+			"type":               string(c.Type),
+			"status":             string(c.Status),
+			"reason":             c.Reason,
+			"message":            c.Message,
 			"lastTransitionTime": c.LastTransitionTime.Unix(),
 		})
 	}
 
 	// 每容器状态与启动时间
-	containers := make([]gin.H, 0, len(p.Spec.Containers))
-	for _, ctr := range p.Spec.Containers {
+	specs := append([]corev1.Container{}, p.Spec.InitContainers...)
+	specs = append(specs, p.Spec.Containers...)
+	statuses := append([]corev1.ContainerStatus{}, p.Status.InitContainerStatuses...)
+	statuses = append(statuses, p.Status.ContainerStatuses...)
+	containers := make([]gin.H, 0, len(specs))
+	for _, ctr := range specs {
 		entry := gin.H{
 			"name":  ctr.Name,
 			"image": ctr.Image,
 			"ready": false,
 			"state": "Unknown",
 		}
-		for _, cs := range p.Status.ContainerStatuses {
+		for _, cs := range statuses {
 			if cs.Name != ctr.Name {
 				continue
 			}
@@ -87,25 +91,25 @@ func (h *Handler) podDetail(c *gin.Context) {
 
 	// QoS 与调度信息
 	c.JSON(http.StatusOK, gin.H{
-		"namespace":    p.Namespace,
-		"name":         p.Name,
-		"phase":        string(p.Status.Phase),
-		"status":       podStatus(*p),
-		"startTime":    startTime,
-		"nodeName":     p.Spec.NodeName,
-		"podIP":        p.Status.PodIP,
-		"hostIP":       p.Status.HostIP,
-		"qosClass":     string(p.Status.QOSClass),
-		"restartPolicy": string(p.Spec.RestartPolicy),
-		"schedulerName": p.Spec.SchedulerName,
+		"namespace":      p.Namespace,
+		"name":           p.Name,
+		"phase":          string(p.Status.Phase),
+		"status":         podStatus(*p),
+		"startTime":      startTime,
+		"nodeName":       p.Spec.NodeName,
+		"podIP":          p.Status.PodIP,
+		"hostIP":         p.Status.HostIP,
+		"qosClass":       string(p.Status.QOSClass),
+		"restartPolicy":  string(p.Spec.RestartPolicy),
+		"schedulerName":  p.Spec.SchedulerName,
 		"serviceAccount": p.Spec.ServiceAccountName,
-		"conditions":   conditions,
-		"containers":   containers,
-		"labels":       p.Labels,
-		"annotations":  p.Annotations,
-		"creationTime": p.CreationTimestamp.Unix(),
-		"deletionTime": deletionTime(p),
-		"restarts":     totalRestarts(*p),
+		"conditions":     conditions,
+		"containers":     containers,
+		"labels":         p.Labels,
+		"annotations":    p.Annotations,
+		"creationTime":   p.CreationTimestamp.Unix(),
+		"deletionTime":   deletionTime(p),
+		"restarts":       totalRestarts(*p),
 	})
 }
 
@@ -118,6 +122,9 @@ func deletionTime(p *corev1.Pod) int64 {
 
 func totalRestarts(p corev1.Pod) int32 {
 	var n int32
+	for _, cs := range p.Status.InitContainerStatuses {
+		n += cs.RestartCount
+	}
 	for _, cs := range p.Status.ContainerStatuses {
 		n += cs.RestartCount
 	}

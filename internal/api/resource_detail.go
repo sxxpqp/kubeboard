@@ -80,14 +80,14 @@ func (h *Handler) resourceDetail(c *gin.Context) {
 	yamlBytes, _ := yaml.Marshal(content)
 
 	resp := gin.H{
-		"kind":        gvk.Kind,
-		"apiVersion":  gvk.GroupVersion().String(),
-		"namespace":   ns,
-		"name":        name,
-		"metadata":    meta,
-		"spec":        spec,
-		"status":      status,
-		"rawYaml":     string(yamlBytes),
+		"kind":       gvk.Kind,
+		"apiVersion": gvk.GroupVersion().String(),
+		"namespace":  ns,
+		"name":       name,
+		"metadata":   meta,
+		"spec":       spec,
+		"status":     status,
+		"rawYaml":    string(yamlBytes),
 	}
 
 	// PVC：找出正在使用它的 Pod（跨命名空间扫描）
@@ -168,9 +168,9 @@ func podSpecStatus(content map[string]interface{}) (gin.H, gin.H) {
 			"name": c.Name, "image": c.Image,
 			"imagePullPolicy": string(c.ImagePullPolicy),
 			"command":         c.Command, "args": c.Args,
-			"ports":           c.Ports, "env": envList(c.Env),
-			"resources":       c.Resources,
-			"readinessProbe":  c.ReadinessProbe, "livenessProbe": c.LivenessProbe,
+			"ports": c.Ports, "env": envList(c.Env),
+			"resources":      c.Resources,
+			"readinessProbe": c.ReadinessProbe, "livenessProbe": c.LivenessProbe,
 		}
 		containers = append(containers, cs)
 	}
@@ -285,14 +285,23 @@ func workloadSpecStatus(content map[string]interface{}) (gin.H, gin.H) {
 		"replicas": desired, "containers": containers,
 		"selector": selMap, "strategy": strategy,
 		"maxSurge": maxSurge, "maxUnavailable": maxUnavailable,
-		"paused": d.Spec.Paused,
+		"paused":    d.Spec.Paused,
 		"podLabels": d.Spec.Template.Labels,
-		"volumes": d.Spec.Template.Spec.Volumes,
+		"volumes":   d.Spec.Template.Spec.Volumes,
+	}
+	conditions := make([]gin.H, 0, len(d.Status.Conditions))
+	for _, c := range d.Status.Conditions {
+		conditions = append(conditions, gin.H{
+			"type": string(c.Type), "status": string(c.Status),
+			"reason": c.Reason, "message": c.Message,
+			"lastUpdate": c.LastUpdateTime.Unix(),
+		})
 	}
 	status := gin.H{
 		"replicas": d.Status.Replicas, "readyReplicas": d.Status.ReadyReplicas,
 		"availableReplicas": d.Status.AvailableReplicas, "updatedReplicas": d.Status.UpdatedReplicas,
 		"unavailableReplicas": d.Status.UnavailableReplicas,
+		"conditions":          conditions,
 		"observation":         gin.H{"observedGeneration": d.Status.ObservedGeneration, "generation": d.Generation},
 	}
 	return spec, status
@@ -348,6 +357,17 @@ func strKeys(m gin.H) []string {
 }
 
 func storageSpecStatus(content map[string]interface{}) (gin.H, gin.H) {
+	if strings.EqualFold(metaString(content, "kind"), "PersistentVolume") {
+		var pv corev1.PersistentVolume
+		b, _ := json.Marshal(content)
+		_ = json.Unmarshal(b, &pv)
+		return gin.H{
+			"accessModes": pv.Spec.AccessModes, "storageClass": pv.Spec.StorageClassName,
+			"capacity": pv.Spec.Capacity, "claimRef": pv.Spec.ClaimRef,
+			"reclaimPolicy": pv.Spec.PersistentVolumeReclaimPolicy, "volumeMode": pv.Spec.VolumeMode,
+		}, gin.H{"phase": string(pv.Status.Phase), "capacity": pv.Spec.Capacity}
+	}
+
 	var pvc corev1.PersistentVolumeClaim
 	b, _ := json.Marshal(content)
 	_ = json.Unmarshal(b, &pvc)
@@ -458,7 +478,6 @@ func bytesOrPct(rl corev1.ResourceList) string {
 	}
 	return ""
 }
-
 
 // podsUsingPVC 扫描所有命名空间的 Pod，找出引用了指定 PVC 的（跨 ns 亦可挂载同 ns 的 PVC）
 func (h *Handler) podsUsingPVC(ctx context.Context, ns, pvcName string) []gin.H {

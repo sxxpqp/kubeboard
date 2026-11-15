@@ -1,5 +1,5 @@
 // 资源 CRUD 组合式函数：各页面共享创建/编辑/删除逻辑
-import { ref } from 'vue'
+import { ref, unref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import http from '../api/http'
 
@@ -21,7 +21,9 @@ export function useResourceCRUD(kind, reloadFn) {
     return nsList.value
   }
 
-  function openCreate(template = '') {
+  function openCreate(template = '', namespace = '') {
+    currentNamespace.value = namespace
+    currentName.value = ''
     dialogMode.value = 'create'
     currentTemplate.value = template
     loadNamespaces()
@@ -47,7 +49,7 @@ export function useResourceCRUD(kind, reloadFn) {
       return
     }
     try {
-      const params = { kind, name }
+      const params = { kind: unref(kind), name }
       if (namespace) params.namespace = namespace
       await http.delete('/resources', { params })
       ElMessage.success(`已删除 ${name}`)

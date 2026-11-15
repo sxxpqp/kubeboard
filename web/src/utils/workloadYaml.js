@@ -12,10 +12,42 @@ export function objToKv(obj) {
   return Object.entries(obj).map(([key, value]) => ({ key, value: String(value ?? '') }))
 }
 
-export function splitShell(s) {
-  if (!s || !Array.isArray(s) && typeof s !== 'string') return []
-  if (Array.isArray(s)) return s
-  return s.match(/"[^"]*"|'[^']*'|\S+/g)?.map((x) => x.replace(/^["']|["']$/g, '')) || []
+export function splitShell(value) {
+  if (Array.isArray(value)) return value
+  if (!value || typeof value !== 'string') return []
+  const result = []
+  let token = '', quote = '', escaped = false, started = false
+  for (let index = 0; index < value.length; index++) {
+    const char = value[index]
+    if (escaped) {
+      if (quote === 'ansi') {
+        const controls = { n: '\n', r: '\r', t: '\t', b: '\b', f: '\f', v: '\v' }
+        if (char === 'x' && /^[0-9a-f]{2}$/i.test(value.slice(index+1,index+3))) {token += String.fromCharCode(parseInt(value.slice(index+1,index+3),16));index += 2}
+        else token += controls[char] ?? char
+      } else token += char
+      escaped = false; started = true; continue
+    }
+    if (char === '\\' && quote !== "'") { escaped = true; started = true; continue }
+    if (quote) { if (char === (quote === 'ansi' ? "'" : quote)) quote = ''; else token += char; started = true; continue }
+    if (char === '$' && value[index+1] === "'") {quote='ansi';index++;started=true;continue}
+    if (char === '"' || char === "'") { quote = char; started = true; continue }
+    if (/\s/.test(char)) { if (started) { result.push(token); token = ''; started = false } }
+    else { token += char; started = true }
+  }
+  if (quote || escaped) throw new Error('启动命令或参数的引号、转义未闭合')
+  if (started) result.push(token)
+  return result
+}
+
+export function formatShell(argv) {
+  return (argv || []).map(item => {
+    const value=String(item)
+    if (/[\x00-\x1f\x7f]/.test(value)) {
+      const escapes={ '\n':'\\n', '\r':'\\r', '\t':'\\t', '\\':'\\\\', "'":"\\'" }
+      return "$'" + value.replace(/[\\'\x00-\x1f\x7f]/g, char => escapes[char] || '\\x'+char.charCodeAt(0).toString(16).padStart(2,'0')) + "'"
+    }
+    return /^[a-zA-Z0-9_./:=+-]+$/.test(value) ? value : "'" + value.replaceAll("'", "'\\''") + "'"
+  }).join(' ')
 }
 
 export function emptyProbe() {
@@ -286,8 +318,8 @@ export function parseWorkloadYaml(yamlText) {
       ctr.name = c.name || 'app'
       ctr.image = c.image || ''
       ctr.imagePullPolicy = c.imagePullPolicy || 'IfNotPresent'
-      ctr.command = (c.command || []).join(' ')
-      ctr.args = (c.args || []).join(' ')
+      ctr.command = formatShell(c.command)
+      ctr.args = formatShell(c.args)
       ctr.ports = (c.ports || []).map((p) => ({
         name: p.name || '', containerPort: p.containerPort, protocol: p.protocol || 'TCP',
       }))
@@ -306,7 +338,7 @@ export function parseWorkloadYaml(yamlText) {
           ep.enabled = true
           if (p.httpGet) { ep.type = 'httpGet'; ep.path = p.httpGet.path || '/'; ep.port = p.httpGet.port }
           else if (p.tcpSocket) { ep.type = 'tcpSocket'; ep.port = p.tcpSocket.port }
-          else if (p.exec) { ep.type = 'exec'; ep.command = (p.exec.command || []).join(' ') }
+          else if (p.exec) { ep.type = 'exec'; ep.command = formatShell(p.exec.command) }
           ep.initialDelaySeconds = p.initialDelaySeconds ?? 5
           ep.periodSeconds = p.periodSeconds ?? 10
           ep.timeoutSeconds = p.timeoutSeconds ?? 2

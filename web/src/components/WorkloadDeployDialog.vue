@@ -72,10 +72,10 @@
             </el-form-item>
 
             <el-form-item label="启动命令">
-              <el-input v-model="ctr.command" placeholder="如 /bin/sh -c（留空用镜像默认，多个用空格分隔）" style="width: 460px" />
+              <el-input v-model="ctr.command" placeholder="例如 /bin/sh -c；留空使用镜像默认入口" style="width: 460px" />
             </el-form-item>
             <el-form-item label="参数">
-              <el-input v-model="ctr.args" placeholder="如 '-c' 'sleep 3600'" style="width: 460px" />
+              <el-input v-model="ctr.args" placeholder="例如 &quot;echo hello world&quot;，引号内作为一个参数" style="width: 460px" />
             </el-form-item>
 
             <el-form-item label="环境变量">

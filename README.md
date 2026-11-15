@@ -56,6 +56,30 @@ go build -o kubeboard ./cmd/kubeboard
 > ⚠️ **安全**：默认凭据仅用于本地开发。生产部署务必通过环境变量或 Secret 覆盖
 > `KUBEBOARD_JWT_SECRET` 和 `KUBEBOARD_ADMIN_PASSWORD`。
 
+### 本地开发（热重载）
+
+前端用 Vite dev server，后端用 [air](https://github.com/air-verse/air) 热重载，两者分开跑：
+
+```bash
+# 终端 1：后端热重载（项目根目录，配置见 .air.toml）
+air -c .air.toml
+# （或直接 `air`，默认读取根目录 .air.toml）
+
+# 终端 2：前端 dev server（:8080，/api 代理到 :9090）
+cd web
+npm install
+npm run dev
+```
+
+浏览器打开 `http://localhost:8080`。
+
+**注意**：
+
+- `.air.toml` 已排除 `web/`、`tmp/`、`bin/` 等目录（避免监视 node_modules 触发 `too many open files`）。
+- 新增/修改后端接口后请确认 air 完成编译（日志出现 `running...`），否则 9090 上仍是旧二进制，
+  新路由会返回 404。
+- air 启动报 `address already in use` 说明 9090 被旧进程占用，先 `pkill -f kubeboard` 再启动。
+
 ## 部署到 Kubernetes（最小权限）
 
 `deploy/` 下提供最小权限模型：
@@ -82,3 +106,7 @@ kubectl apply -f deploy/deployment.yaml
 ## License
 
 MIT
+
+## 产品与 UI 设计
+
+当前设计与两轮 KubeSphere 对标记录见 [设计入口](docs/design-review.md)。旧设计已由新基线替代；按产品设计、产品对比、UI 设计、UI 对比、实施验证的顺序推进。

@@ -1,5 +1,5 @@
 <template>
-  <el-dialog
+  <component :is="embedded ? 'section' : 'el-dialog'"
     v-model="visible"
     :title="`终端: ${podName}`"
     width="900px"
@@ -21,20 +21,22 @@
       <span class="term-status" :class="statusClass">{{ statusText }}</span>
     </div>
     <div ref="termEl" class="term-box"></div>
-  </el-dialog>
+  </component>
 </template>
 
 <script setup>
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, onBeforeUnmount } from 'vue'
 import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 import 'xterm/css/xterm.css'
 
 const props = defineProps({
   modelValue: Boolean,
+  embedded: Boolean,
   namespace: { type: String, required: true },
   podName: { type: String, required: true },
   containers: { type: Array, default: () => [] },
+  initialContainer: { type: String, default: '' },
 })
 const emit = defineEmits(['update:modelValue'])
 
@@ -53,10 +55,10 @@ let resizeObserver = null
 watch(() => props.modelValue, (v) => {
   visible.value = v
   if (v) {
-    container.value = props.containers[0] || ''
+    container.value = props.initialContainer || props.containers[0] || ''
     nextTick(initTerm)
   }
-})
+}, { immediate: true })
 watch(visible, (v) => { if (!v) emit('update:modelValue', false) })
 
 function initTerm() {
@@ -109,6 +111,8 @@ function connect() {
 function disconnect() {
   if (ws) { ws.close(); ws = null }
 }
+
+onBeforeUnmount(onClosed)
 
 function onClosed() {
   disconnect()

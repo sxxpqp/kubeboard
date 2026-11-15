@@ -69,8 +69,8 @@
                   <el-option label="Never" value="Never" />
                 </el-select>
               </el-form-item>
-              <el-form-item label="启动命令"><el-input v-model="ctr.command" style="width: 460px" placeholder="多个用空格分隔" /></el-form-item>
-              <el-form-item label="参数"><el-input v-model="ctr.args" style="width: 460px" placeholder="多个用空格分隔" /></el-form-item>
+              <el-form-item label="启动命令"><el-input v-model="ctr.command" style="width: 460px" placeholder="参数用空格分隔，单个参数含空格时用引号包裹" /></el-form-item>
+              <el-form-item label="参数"><el-input v-model="ctr.args" style="width: 460px" placeholder="参数用空格分隔，单个参数含空格时用引号包裹" /></el-form-item>
               <el-form-item label="端口">
                 <div class="port-list">
                   <div v-for="(p, pi) in ctr.ports" :key="pi" class="port-row">
@@ -230,6 +230,8 @@
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import http from '../api/http'
+import { loadAll, dump } from 'js-yaml'
+import { mergeFormChanges } from '../utils/workloadActions'
 import KeyValueEditor from './KeyValueEditor.vue'
 import {
   baseWorkloadForm, buildWorkloadYaml, parseWorkloadYaml,
@@ -246,6 +248,7 @@ import { fieldHelpFor } from '../utils/fieldHelp'
 
 const props = defineProps({
   modelValue: Boolean,
+  initialView: { type: String, default: 'form' },
   mode: { type: String, default: 'create' }, // create | edit
   kind: { type: String, required: true },
   namespace: { type: String, default: '' },
@@ -259,6 +262,8 @@ const visible = ref(props.modelValue)
 const view = ref('yaml')
 const yamlText = ref('')
 const form = ref(baseWorkloadForm())
+const originalDocuments = ref([])
+const baselineDocuments = ref([])
 const saving = ref(false)
 const errorMsg = ref('')
 const openSections = ref(['basic', 'containers'])
@@ -277,7 +282,7 @@ watch(() => props.modelValue, async (v) => {
   if (!v) return
 
   formAvailable.value = FORM_KINDS.includes(props.kind) || ALL_FORM_KINDS.includes(String(props.kind || '').toLowerCase())
-  view.value = formAvailable.value ? 'form' : 'yaml'
+  view.value = formAvailable.value && props.initialView !== 'yaml' ? 'form' : 'yaml'
   if (isSimpleKind.value) simpleForm.value = newSimpleForm(props.kind)
 
   if (props.mode === 'edit') {
@@ -297,6 +302,7 @@ watch(() => props.modelValue, async (v) => {
     }
   } else {
     yamlText.value = props.template || ''
+    if(props.namespace && yamlText.value){try{const docs=loadAll(yamlText.value).filter(Boolean);for(const doc of docs){doc.metadata||={};doc.metadata.namespace=props.namespace}yamlText.value=docs.map(doc=>dump(doc)).join('---\n')}catch(e){errorMsg.value=e.message}}
     syncFormFromYaml()
   }
 })
@@ -314,6 +320,8 @@ function syncFormFromYaml() {
   if (parsed) {
     // 保留用户可能已改的 ns
     form.value = parsed
+    originalDocuments.value = loadAll(yamlText.value).filter(Boolean)
+    baselineDocuments.value = loadAll(buildWorkloadYaml(parsed)).filter(Boolean)
   }
 }
 
@@ -328,7 +336,12 @@ function parseSimpleYaml(kind, text) {
   return parseFormYaml(kind, text) || parseExtraYaml(kind, text)
 }
 
-const formYaml = computed(() => buildWorkloadYaml(form.value))
+const formYaml = computed(() => {
+  const built = buildWorkloadYaml(form.value)
+  if (!baselineDocuments.value.length) return built
+  const edited = loadAll(built).filter(Boolean)
+  return edited.map((document, index) => dump(mergeFormChanges(originalDocuments.value[index], baselineDocuments.value[index], document))).join('---\n')
+})
 const simpleFormYaml = computed(() => (simpleForm.value ? buildSimpleYaml(props.kind, simpleForm.value) : ''))
 
 function probeLabel(k) {
